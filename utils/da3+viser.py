@@ -2,12 +2,18 @@ import os
 import numpy as np
 import torch
 import sys
+import glob
 project_root = os.path.dirname(os.path.abspath("/home/zhouyi/repo/DA3-VGGT/"))
 sys.path.insert(0, project_root)  
 
 from depth_anything_3.api import DepthAnything3
-from src.viser_server import da3_prediction_to_viser_dict, viser_wrapper
+from utils.viser_server import da3_prediction_to_viser_dict, viser_wrapper
 
+def load_all_image(folder_path):
+    image_paths = sorted(glob.glob(os.path.join(folder_path, "*.png"), recursive=False) )
+    # print(image_paths)
+    image_paths.sort()
+    return image_paths
 
 def main():
     # 初始化设备
@@ -21,10 +27,9 @@ def main():
     model.eval()
     
     # 准备输入图像
-    image_paths = [
-        "/home/zhouyi/repo/dataset/sydney/000000.png",
-        "/home/zhouyi/repo/dataset/sydney/000001.png",
-    ]
+    folder_path ="/home/zhouyi/repo/dataset/sydney"
+    image_paths = load_all_image(folder_path)
+    
     
     # 推理
     print("Running DA3 inference...")

@@ -68,10 +68,6 @@ def viser_wrapper(
         world_points = world_points_map
         conf = conf_map
 
-    # Apply sky segmentation if enabled
-    if mask_sky and image_folder is not None:
-        conf = apply_sky_segmentation(conf, image_folder)
-
     # Convert images from (S, 3, H, W) to (S, H, W, 3)
     # Then flatten everything for the point cloud
     colors = images.transpose(0, 2, 3, 1)  # now (S, H, W, 3)
