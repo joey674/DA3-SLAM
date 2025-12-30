@@ -586,42 +586,42 @@ class DA3_Streaming:
 
             pre_predictions = cur_predictions
 
-        if self.loop_enable:
-            self.loop_list = self.get_loop_pairs()
-            del self.loop_detector  # Save GPU Memory
+        # if self.loop_enable:
+        #     self.loop_list = self.get_loop_pairs()
+        #     del self.loop_detector  # Save GPU Memory
 
-            torch.cuda.empty_cache()
+        #     torch.cuda.empty_cache()
 
-            print("Loop SIM(3) estimating...")
-            loop_results = process_loop_list(
-                self.chunk_indices,
-                self.loop_list,
-                half_window=int(self.config["Model"]["loop_chunk_size"] / 2),
-            )
-            loop_results = remove_duplicates(loop_results)
-            print(loop_results)
-            # return e.g. (31, (1574, 1594), 2, (129, 149))
-            for item in loop_results:
-                single_chunk_predictions = self.process_single_chunk(
-                    item[1], range_2=item[3], is_loop=True
-                )
+        #     print("Loop SIM(3) estimating...")
+        #     loop_results = process_loop_list(
+        #         self.chunk_indices,
+        #         self.loop_list,
+        #         half_window=int(self.config["Model"]["loop_chunk_size"] / 2),
+        #     )
+        #     loop_results = remove_duplicates(loop_results)
+        #     print(loop_results)
+        #     # return e.g. (31, (1574, 1594), 2, (129, 149))
+        #     for item in loop_results:
+        #         single_chunk_predictions = self.process_single_chunk(
+        #             item[1], range_2=item[3], is_loop=True
+        #         )
 
-                self.loop_predict_list.append((item, single_chunk_predictions))
-                print(item)
+        #         self.loop_predict_list.append((item, single_chunk_predictions))
+        #         print(item)
 
-            self.loop_sim3_list = self.get_loop_sim3_from_loop_predict(self.loop_predict_list)
+        #     self.loop_sim3_list = self.get_loop_sim3_from_loop_predict(self.loop_predict_list)
 
-            input_abs_poses = self.loop_optimizer.sequential_to_absolute_poses(
-                self.sim3_list
-            )  # just for plot
-            self.sim3_list = self.loop_optimizer.optimize(self.sim3_list, self.loop_sim3_list)
-            optimized_abs_poses = self.loop_optimizer.sequential_to_absolute_poses(
-                self.sim3_list
-            )  # just for plot
+        #     input_abs_poses = self.loop_optimizer.sequential_to_absolute_poses(
+        #         self.sim3_list
+        #     )  # just for plot
+        #     self.sim3_list = self.loop_optimizer.optimize(self.sim3_list, self.loop_sim3_list)
+        #     optimized_abs_poses = self.loop_optimizer.sequential_to_absolute_poses(
+        #         self.sim3_list
+        #     )  # just for plot
 
-            self.plot_loop_closure(
-                input_abs_poses, optimized_abs_poses, save_name="sim3_opt_result.png"
-            )
+        #     self.plot_loop_closure(
+        #         input_abs_poses, optimized_abs_poses, save_name="sim3_opt_result.png"
+        #     )
 
         print("Apply alignment")
         self.sim3_list = accumulate_sim3_transforms(self.sim3_list)
