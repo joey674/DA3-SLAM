@@ -32,7 +32,7 @@ def main():
         sys.exit(1)
     
     # 导入路径设置
-    project_root = os.path.dirname(os.path.abspath("/home/zhouyi/repo/DA3-VGGT/"))
+    project_root = os.path.dirname(os.path.abspath("/home/zhouyi/repo/DA3-SLAM/"))
     sys.path.insert(0, project_root)
     
     # 运行SLAM

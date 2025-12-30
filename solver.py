@@ -11,9 +11,11 @@ from collections import deque
 from align import (
     extract_overlap_points,
     align_two_point_clouds,
+)
+
+from geometry import (
     accumulate_sim3_transforms,
     transform_camera_pose,
-    align_two_point_clouds_irls,
 )
 
 
@@ -63,6 +65,7 @@ class SLAMSolver:
         try:
             from depth_anything_3.api import DepthAnything3
             model_path = "/home/zhouyi/repo/Depth-Anything-3/checkpoints/DA3-BASE"
+            # model_path = "/home/zhouyi/repo/Depth-Anything-3/checkpoints/DA3NESTED-GIANT-LARGE-1.1"
             print(f"Loading DA3 model from {model_path}...")
             self.model = DepthAnything3.from_pretrained(model_path)
             self.model = self.model.to(self.device)
@@ -190,7 +193,6 @@ class SLAMSolver:
                     image=chunk_image_paths,
                     process_res=504,
                     process_res_method="upper_bound_resize",
-                    export_dir=None,
                 )
                 
                 # 整理预测结果
@@ -246,14 +248,14 @@ class SLAMSolver:
     
     def process_frame(self, image_path: str):
         """
-        处理一帧图像（流式处理）
+        处理一帧图像
         
         Args:
             image_path: 图像路径
         """
         self.frame_count += 1
         
-        # 存储图像路径到缓冲区
+        # 存储图像路径到frame_buffer
         frame_data = {
             'idx': self.frame_count,
             'path': image_path,
@@ -264,43 +266,45 @@ class SLAMSolver:
         if self.should_process_chunk():
             print(f"\n  Processing chunk {self.chunk_count}...")
             
-            # 1. 准备chunk数据
+            # 准备chunk数据
             chunk_image_paths = self.load_chunk_image_paths()
             
-            # 2. 处理chunk
+            # 处理chunk
             cur_chunk_prediction = self.run_single_chunk_prediction(chunk_image_paths)
             
-            # 3. 添加到chunk列表
+            # 添加到chunk列表
             self.chunk_prediction_list.append(cur_chunk_prediction)
             
-            # 4. 对齐处理（如果不是第一个chunk）
+            # 对齐处理（如果不是第一个chunk）
             if self.chunk_count > 0:
                 pre_chunk_prediction = self.chunk_prediction_list[self.chunk_count - 1]
                 s, R, t = self.process_chunk_alignment(pre_chunk_prediction, cur_chunk_prediction)
                 self.sim3_transforms.append((s, R, t))
             
-            # 5. 更新累积变换
+            # 更新累积变换
             self.accumulated_transforms = accumulate_sim3_transforms(self.sim3_transforms)
             
-            # 6. 获取当前chunk的变换
+            # 获取当前chunk的变换
             if self.chunk_count == 0:
                 transform = (1.0, np.eye(3), np.zeros(3))
             else:
                 transform = self.accumulated_transforms[self.chunk_count]
             
-            # 9. 更新可视化
+            # 更新可视化
             self.update_viewer(cur_chunk_prediction, transform)
             
-            # 10. 更新缓冲区
+            # 更新缓冲区
             self.update_buffer_after_chunk_processed()
             
-            # 11. 增加chunk计数
+            # 增加chunk计数
             self.chunk_count += 1
             
             print(f"  Chunk {cur_chunk_prediction['chunk_idx']} processed successfully")
             
-            # 等待一会儿以便观察
+            # 等待一会
             time.sleep(3)
+            print("sleep for observation")
+            print("#"*50)
    
     
         
