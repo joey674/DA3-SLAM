@@ -2,34 +2,34 @@
 import os
 import sys
 import argparse
+from config import load_config
+from solver import SLAMSolver
 
 def main():
-    parser = argparse.ArgumentParser(description="DA3-SLAM: Monocular SLAM with Depth Anything 3 (Grouping Mechanism)")
-    parser.add_argument("--image_folder", type=str,
-                        default="/home/zhouyi/repo/dataset/sydney",
-                        # default="/home/zhouyi/repo/dataset/office_loop",
-                        help="Path to folder containing images")
-    parser.add_argument("--group_size", type=int, 
-                        default=5,
-                        help="Number of frames per group (default: 30)")
-    parser.add_argument("--overlap_size", type=int, 
-                        default=2,
-                        help="Number of overlapping frames between groups (default: 15)")
-    parser.add_argument("--port", type=int, 
-                        default=8080,
-                        help="Port for visualization server (default: 8080)")
-    parser.add_argument("--no_vis", action="store_true",
-                        help="Disable visualization")
-    parser.add_argument("--model_name", type=str,
-                        default="DA3-BASE",
-                        # default="DA3NESTED-GIANT-LARGE-1.1",
-                        help="model name for da3")
-    
+    parser = argparse.ArgumentParser(description="DA3-SLAM: Monocular SLAM with Depth Anything 3")
+    parser.add_argument(
+        "--image_dir", 
+        type=str, 
+        required=False,
+        default="/home/zhouyi/repo/dataset/sydney", 
+        help="Image path"
+    )
+    parser.add_argument(
+        "--config",
+        type=str,
+        required=False,
+        default="/home/zhouyi/repo/DA3-SLAM/configs/config1.yaml",
+        help="Image path",
+    )
+
     args = parser.parse_args()
     
+    config = load_config(args.config)
+    image_dir = args.image_dir
+    
     # 检查路径
-    if not os.path.exists(args.image_folder):
-        print(f"Error: Image folder {args.image_folder} does not exist!")
+    if not os.path.exists(image_dir):
+        print(f"Error: Image folder {image_dir} does not exist!")
         sys.exit(1)
     
     # 导入路径设置
@@ -37,17 +37,11 @@ def main():
     sys.path.insert(0, project_root)
     
     # 运行SLAM
-    from solver import SLAMSolver
-    
-    solver = SLAMSolver(
-        viewer_port=args.port,
-        chunk_size=args.group_size,
-        overlap_size=args.overlap_size,
-        model_name=args.model_name)
+    solver = SLAMSolver(image_dir,config)
     
     try:
         # 运行SLAM
-        solver.run_slam(args.image_folder)
+        solver.run()
         
         # 保持可视化运行
         if not args.no_vis:

@@ -1,5 +1,5 @@
 import numpy as np
-from typing import Tuple, Optional,List
+from typing import Tuple, List
 
 def depth_to_point_cloud_vectorized(depth: np.ndarray, intrinsics: np.ndarray, 
                                     extrinsics: np.ndarray) -> np.ndarray:

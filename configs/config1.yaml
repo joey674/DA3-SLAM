@@ -1,0 +1,21 @@
+Weights:
+  # DA3: '/home/zhouyi/repo/Depth-Anything-3/checkpoints/DA3NESTED-GIANT-LARGE-1.1/model.safetensors'
+  # DA3_CONFIG: '/home/zhouyi/repo/Depth-Anything-3/checkpoints/DA3NESTED-GIANT-LARGE-1.1/config.json'
+  DA3: '/home/zhouyi/repo/Depth-Anything-3/checkpoints/DA3-BASE'
+
+Model:
+  chunk_size: 10 # 处理块大小
+  overlap_size: 5 # Number of overlapping frames between groups (default: 15)
+  port: 8080
+
+  Align:
+
+  IRLS:
+    delta: 0.1
+    max_iters: 5
+    tol: 1e-9
+
+Loop:
+  SIM3_Optimizer:
+    max_iterations: 30
+    lambda_init: 1e-6

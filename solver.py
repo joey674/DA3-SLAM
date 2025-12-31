@@ -1,8 +1,6 @@
 # solver.py
-import os
 import numpy as np
 import torch
-import glob
 import time
 from typing import List, Dict, Tuple
 from collections import deque
@@ -17,31 +15,30 @@ from geometry import (
     transform_camara_extrinsics,
 )
 
+from utils import load_image
+
 
 class SLAMSolver:
     def __init__(self, 
-                 viewer_port: int = 8080,
-                 chunk_size: int = 30,
-                 overlap_size: int = 15,
-                 model_name: str = "DA3-BASE"):
+                 image_dir,
+                 config):
         """
         初始化SLAM求解器
         
         Args:
-            viewer_port: 可视化端口
-            chunk_size: 每组帧数
-            overlap_size: 重叠帧数
+        
         """
-        self.chunk_size = chunk_size
-        self.overlap_size = overlap_size
-        self.model_name = model_name
+        self.config = config
+        self.chunk_size = self.config["Model"]["chunk_size"]
+        self.overlap_size = self.config["Model"]["overlap_size"]
+        self.image_dir = image_dir
         
         # 帧计数器
         self.frame_count = 0
         self.chunk_count = 0
         
         # 数据存储 - 流式处理
-        self.frame_buffer: deque = deque(maxlen=chunk_size * 2)  # 帧缓冲区
+        self.frame_buffer: deque = deque(maxlen=self.chunk_size * 2)  # 帧缓冲区
         self.chunk_prediction_list: List[Dict] = []  # 已处理chunk数据
         self.sim3_transforms: List[Tuple[float, np.ndarray, np.ndarray]] = []  # SIM(3)变换列表
         self.accumulated_transforms: List[Tuple[float, np.ndarray, np.ndarray]] = []  # 累积变换列表
@@ -52,7 +49,7 @@ class SLAMSolver:
         
         # 可视化器
         self.viewer = None
-        self.init_viewer(viewer_port)
+        self.init_viewer()
     
     def load_model(self):
         """加载DA3模型"""
@@ -62,7 +59,7 @@ class SLAMSolver:
         
         try:
             from depth_anything_3.api import DepthAnything3
-            model_path = "/home/zhouyi/repo/Depth-Anything-3/checkpoints/" + self.model_name
+            model_path = self.config["Weights"]["DA3"]
             print(f"Loading DA3 model from {model_path}...")
             self.model = DepthAnything3.from_pretrained(model_path)
             self.model = self.model.to(self.device)
@@ -75,8 +72,9 @@ class SLAMSolver:
             print(f"Error loading model: {e}")
             raise
     
-    def init_viewer(self, port: int):
+    def init_viewer(self):
         """初始化可视化器"""
+        port = self.config["Model"]["port"]
         try:
             from viewer import SLAMViewer
             self.viewer = SLAMViewer(port=port)
@@ -307,32 +305,9 @@ class SLAMSolver:
             print("  Sleep for observation")
             print("#"*50)
    
-    
-        
-    def load_image_paths(self, folder_path: str) -> List[str]:
-        """加载图像路径列表"""
-        extensions = ['*.png', '*.jpg', '*.jpeg', '*.bmp', '*.tiff', '*.tif']
-        image_paths = []
-        for ext in extensions:
-            image_paths.extend(glob.glob(os.path.join(folder_path, ext), recursive=False))
-        
-        # 排序 (按数字顺序 )
-        def extract_number(filename):
-            base = os.path.basename(filename)
-            name, _ = os.path.splitext(base)
-            numbers = ''.join(filter(str.isdigit, name))
-            return int(numbers) if numbers else 0
-        
-        image_paths.sort(key=extract_number)
-        
-        if not image_paths:
-            print(f"Warning: No images found in {folder_path}")
-            return []
-        
-        print(f"Found {len(image_paths)} images in {folder_path}")
-        return image_paths
+   
 
-    def run_slam(self, folder_path: str):
+    def run(self):
         """
         运行完整的SLAM流程 流式处理
         
@@ -343,10 +318,12 @@ class SLAMSolver:
         print("Starting DA3-Streaming SLAM (Streaming Mode)...")
         print("=" * 50)
         
+        image_dir = self.image_dir
+        
         # 加载所有图像路径
-        image_paths = self.load_image_paths(folder_path)
+        image_paths = load_image(image_dir)
         if not image_paths:
-            print(f"Warning: No images found in {folder_path}")
+            print(f"Warning: No images found in {image_dir}")
             return
         
         # 流式处理每一帧

@@ -4,7 +4,7 @@
 """
 
 import numpy as np
-from typing import Tuple, Optional,List
+from typing import Tuple
 from geometry import (
     depth_to_point_cloud_vectorized,
     apply_sim3_transform,
