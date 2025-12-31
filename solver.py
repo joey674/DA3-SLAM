@@ -7,15 +7,14 @@ import time
 from typing import List, Dict, Tuple
 from collections import deque
 
-# 导入点云配准模块
 from align import (
-    extract_overlap_points,
+    extract_overlap_chunk_prediction,
     align_two_point_clouds,
 )
 
 from geometry import (
     accumulate_sim3_transforms,
-    transform_camera_pose,
+    transform_camara_extrinsics,
 )
 
 
@@ -24,7 +23,7 @@ class SLAMSolver:
                  viewer_port: int = 8080,
                  chunk_size: int = 30,
                  overlap_size: int = 15,
-                 min_confidence: float = 0.5):
+                 model_name: str = "DA3-BASE"):
         """
         初始化SLAM求解器
         
@@ -32,11 +31,10 @@ class SLAMSolver:
             viewer_port: 可视化端口
             chunk_size: 每组帧数
             overlap_size: 重叠帧数
-            min_confidence: 最小置信度阈值
         """
         self.chunk_size = chunk_size
         self.overlap_size = overlap_size
-        self.min_confidence = min_confidence
+        self.model_name = model_name
         
         # 帧计数器
         self.frame_count = 0
@@ -64,8 +62,7 @@ class SLAMSolver:
         
         try:
             from depth_anything_3.api import DepthAnything3
-            model_path = "/home/zhouyi/repo/Depth-Anything-3/checkpoints/DA3-BASE"
-            # model_path = "/home/zhouyi/repo/Depth-Anything-3/checkpoints/DA3NESTED-GIANT-LARGE-1.1"
+            model_path = "/home/zhouyi/repo/Depth-Anything-3/checkpoints/" + self.model_name
             print(f"Loading DA3 model from {model_path}...")
             self.model = DepthAnything3.from_pretrained(model_path)
             self.model = self.model.to(self.device)
@@ -108,17 +105,34 @@ class SLAMSolver:
                         self.frame_buffer.popleft()
     
     def update_viewer(self, chunk_data: Dict, transform: Tuple[float, np.ndarray, np.ndarray]):
-        """更新可视化器"""
+        """
+        更新可视化器
+        Args:
+            chunk_data: chunk的数据
+            transform: 这个chunk相对于全局坐标系(也就是第一个chunk)的变换
+            
+        Returns:
+            s: 尺度因子
+            R: 旋转矩阵 [3, 3]
+            t: 平移向量 [3]
+        """
         if self.viewer is None:
             return
         
         N = len(chunk_data['extrinsics'])
         
-        for i in range(N):
+        # 只显示第一帧和最后一帧,中间的帧先不渲染（这里之后可以再删）
+        # if N == 1:
+        #     frame_indices = [0]
+        # else:
+        #     frame_indices = [0, N-1]
+        frame_indices = list(range(0, N))
+        
+        for i in frame_indices:
             # 计算帧索引
             frame_idx = self.frame_count - len(self.frame_buffer) - (self.chunk_size - N) + i
             
-            # 提取原始图像（需要转换为CHW格式）
+            # 提取原始图像 需要转换为CHW格式
             image_hwc = chunk_data['processed_images'][i]  # [H, W, 3]
             image_chw = image_hwc.transpose(2, 0, 1) / 255.0  # [3, H, W] 归一化
             
@@ -129,7 +143,7 @@ class SLAMSolver:
             conf = chunk_data['conf'][i]  # [H, W]
             
             # 获取变换后的外参
-            extrinsic_global = transform_camera_pose(chunk_data['extrinsics'][i], *transform)
+            extrinsic_global = transform_camara_extrinsics(chunk_data['extrinsics'][i], *transform)
             
             # 获取内参
             intrinsic = chunk_data['intrinsics'][i]  # [3, 3]
@@ -143,16 +157,14 @@ class SLAMSolver:
                 intrinsic=intrinsic,
                 frame_idx=frame_idx
             )
-        
-        print(f"  Chunk {chunk_data['chunk_idx']} visualized ({N} frames)")
     
-    def process_chunk_alignment(self, prev_chunk_data: Dict, current_chunk_data: Dict) -> Tuple[float, np.ndarray, np.ndarray]:
+    def process_chunk_alignment(self, prev_chunk_prediction: Dict, cur_chunk_prediction: Dict) -> Tuple[float, np.ndarray, np.ndarray]:
         """
-        处理chunk对齐（使用IRLS算法）
+        处理chunk对齐
         
         Args:
-            prev_chunk_data: 前一个chunk的数据
-            current_chunk_data: 当前chunk的数据
+            prev_chunk_prediction: 前一个chunk的数据
+            cur_chunk_prediction: 当前chunk的数据
             
         Returns:
             s: 尺度因子
@@ -162,14 +174,13 @@ class SLAMSolver:
         print(f"  Aligning chunk {self.chunk_count} with previous chunk...")
         
         # 提取重叠区域点云和置信度
-        point_map1, point_map2, conf1, conf2 = extract_overlap_points(
-            prev_chunk_data, current_chunk_data, self.overlap_size
+        point_map1, point_map2, conf1, conf2 = extract_overlap_chunk_prediction(
+            prev_chunk_prediction, cur_chunk_prediction, self.overlap_size
         )
         
-        # 使用IRLS算法对齐点云
+        # 对齐点云
         s, R, t = align_two_point_clouds(point_map1, point_map2, conf1, conf2)
-        
-        print(f"  Alignment successful: s={s:.4f}")
+
         return s, R, t
     
     def run_single_chunk_prediction(self, chunk_image_paths: List[str]) -> Dict:
@@ -182,36 +193,31 @@ class SLAMSolver:
         Returns:
             预测结果字典
         """
-        print(f"Processing chunk {self.chunk_count} with {len(chunk_image_paths)} images...")
+        print(f"  Predict single chunk {self.chunk_count} with {len(chunk_image_paths)} images through da3...")
         
-        try:
-            with torch.no_grad():
-                torch.cuda.empty_cache()
-                
-                # 使用DA3处理整个块
-                prediction = self.model.inference(
+        prediction = self.model.inference(
                     image=chunk_image_paths,
                     process_res=504,
                     process_res_method="upper_bound_resize",
                 )
-                
-                # 整理预测结果
-                result = {
-                    'chunk_idx': self.chunk_count,
-                    'image_paths': chunk_image_paths,
-                    'processed_images': prediction.processed_images,  # [N, H, W, 3] uint8
-                    'depth': np.squeeze(prediction.depth),           # [N, H, W] float32
-                    'conf': prediction.conf,                         # [N, H, W] float32
-                    'extrinsics': prediction.extrinsics,             # [N, 3, 4] float32 (w2c)
-                    'intrinsics': prediction.intrinsics,             # [N, 3, 3] float32
-                }
-                
-                return result
-                
-        except Exception as e:
-            print(f"Error during DA3 chunk inference: {e}")
-            raise
-    
+        
+        with torch.no_grad():
+            torch.cuda.empty_cache()
+            
+            # 整理预测结果
+            result = {
+                'chunk_idx': self.chunk_count,
+                'image_paths': chunk_image_paths,
+                'processed_images': prediction.processed_images, # [N, H, W, 3] uint8
+                'depth': np.squeeze(prediction.depth),           # [N, H, W] float32
+                'conf': prediction.conf,                         # [N, H, W] float32
+                'extrinsics': prediction.extrinsics,             # [N, 3, 4] float32 (w2c)
+                'intrinsics': prediction.intrinsics,             # [N, 3, 3] float32
+            }
+            
+            
+            return result
+               
     def load_chunk_image_paths(self) -> List[str]:
         """
         从缓冲区准备chunk数据
@@ -232,7 +238,7 @@ class SLAMSolver:
         
         return chunk_image_paths
     
-    def should_process_chunk(self) -> bool:
+    def should_run_chunk_prediction(self) -> bool:
         """
         判断是否应该处理当前chunk
         
@@ -263,7 +269,7 @@ class SLAMSolver:
         self.frame_buffer.append(frame_data)
         
         # 检查是否需要处理chunk
-        if self.should_process_chunk():
+        if self.should_run_chunk_prediction():
             print(f"\n  Processing chunk {self.chunk_count}...")
             
             # 准备chunk数据
@@ -284,7 +290,7 @@ class SLAMSolver:
             # 更新累积变换
             self.accumulated_transforms = accumulate_sim3_transforms(self.sim3_transforms)
             
-            # 获取当前chunk的变换
+            # 获取当前chunk的变换(相对于第一个chunk的变换)
             if self.chunk_count == 0:
                 transform = (1.0, np.eye(3), np.zeros(3))
             else:
@@ -303,7 +309,7 @@ class SLAMSolver:
             
             # 等待一会
             time.sleep(3)
-            print("sleep for observation")
+            print("  Sleep for observation")
             print("#"*50)
    
     

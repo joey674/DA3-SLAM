@@ -10,7 +10,7 @@ def main():
                         # default="/home/zhouyi/repo/dataset/office_loop",
                         help="Path to folder containing images")
     parser.add_argument("--group_size", type=int, 
-                        default=5,
+                        default=40,
                         help="Number of frames per group (default: 30)")
     parser.add_argument("--overlap_size", type=int, 
                         default=2,
@@ -18,11 +18,12 @@ def main():
     parser.add_argument("--port", type=int, 
                         default=8080,
                         help="Port for visualization server (default: 8080)")
-    parser.add_argument("--min_confidence", type=float, 
-                        default=0.55,
-                        help="Minimum confidence threshold (default: 0.5)")
     parser.add_argument("--no_vis", action="store_true",
                         help="Disable visualization")
+    parser.add_argument("--model_name", type=str,
+                        default="DA3-BASE",
+                        # default="DA3NESTED-GIANT-LARGE-1.1",
+                        help="model name for da3")
     
     args = parser.parse_args()
     
@@ -42,8 +43,7 @@ def main():
         viewer_port=args.port,
         chunk_size=args.group_size,
         overlap_size=args.overlap_size,
-        min_confidence=args.min_confidence,
-    )
+        model_name=args.model_name)
     
     try:
         # 运行SLAM

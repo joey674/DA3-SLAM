@@ -70,9 +70,20 @@ def apply_sim3_transform(points: np.ndarray, s: float, R: np.ndarray, t: np.ndar
 def accumulate_sim3_transforms(sim3_transforms: List[Tuple[float, np.ndarray, np.ndarray]]) -> List[Tuple[float, np.ndarray, np.ndarray]]:
     """
     累积SIM(3)变换，使每个变换都是相对于第一个块的
-    
-    Args:
-        sim3_transforms: SIM(3)变换列表 [(s, R, t), ...]
+        假设有两个连续的Sim(3)变换：
+
+        变换1 T1 = (s1, R1, t1), 将点从坐标系1变换到坐标系0: p0 = s1 * R1 * p1 + t1
+
+        变换2 T2 = (s2, R2, t2), 将点从坐标系2变换到坐标系1: p1 = s2 * R2 * p2 + t2
+
+        找组合变换 T = T1 ∘ T2, 将点从坐标系2直接变换到坐标系0
+        将 p1 = s2 * R2 * p2 + t2 代入 p0 = s1 * R1 * p1 + t1
+
+        text
+        p0 = s1 * R1 * (s2 * R2 * p2 + t2) + t1 = s1 * s2 * R1 * R2 * p2 + s1 * R1 * t2 + t1
+        
+        Args:
+            sim3_transforms: SIM(3)变换列表 [(s, R, t), ...]
         
     Returns:
         累积后的变换列表
@@ -81,28 +92,33 @@ def accumulate_sim3_transforms(sim3_transforms: List[Tuple[float, np.ndarray, np
         return []
     
     accumulated = []
-    current_s, current_R, current_t = 1.0, np.eye(3), np.zeros(3)
     
-    # 第一个chunk没有变换
-    accumulated.append((current_s, current_R, current_t))
+    # 第一个chunk的变换：从第一个chunk到自身的变换（单位变换）
+    accumulated.append((1.0, np.eye(3), np.zeros(3)))
+    
+    # 对于第一个真正的变换
+    if len(sim3_transforms) > 0:
+        s1, R1, t1 = sim3_transforms[0]
+        accumulated.append((s1, R1, t1))
     
     # 累积后续变换
-    for s, R, t in sim3_transforms:
-        # 累积尺度
-        current_s = current_s * s
+    for i in range(1, len(sim3_transforms)):
+        s_next, R_next, t_next = sim3_transforms[i]
+        s_cum_prev, R_cum_prev, t_cum_prev = accumulated[i]
         
-        # 累积旋转和平移
-        current_t = np.dot(current_R, s * current_t) + t
-        current_R = np.dot(R, current_R)
+        # 组合变换公式
+        s_cum_new = s_cum_prev * s_next
+        R_cum_new = R_cum_prev @ R_next
+        t_cum_new = s_cum_prev * (R_cum_prev @ t_next) + t_cum_prev
         
-        accumulated.append((current_s, current_R, current_t))
+        accumulated.append((s_cum_new, R_cum_new, t_cum_new))
     
     return accumulated
 
 
-def transform_camera_pose(extrinsic: np.ndarray, s: float, R: np.ndarray, t: np.ndarray) -> np.ndarray:
+def transform_camara_extrinsics(extrinsic: np.ndarray, s: float, R: np.ndarray, t: np.ndarray) -> np.ndarray:
     """
-    变换相机位姿
+    根据chunk之间的变换矩阵 更新 新chunk里的相机位姿 到 旧chunk坐标系下的相机位姿
     
     Args:
         extrinsic: 原始外参矩阵 [3, 4] (w2c)
@@ -129,3 +145,35 @@ def transform_camera_pose(extrinsic: np.ndarray, s: float, R: np.ndarray, t: np.
     
     return extrinsic_global
 
+
+
+# def accumulate_sim3_transforms(transforms):
+#     """
+#     DA3-Streaming version
+#     Accumulate adjacent SIM(3) transforms into transforms
+#     from the initial frame to each subsequent frame.
+
+#     Args:
+#     transforms: list, each element is a tuple (R, s, t)
+#         R: 3x3 rotation matrix (np.array)
+#         s: scale factor (scalar)
+#         t: 3x1 translation vector (np.array)
+
+#     Returns:
+#     Cumulative transforms list, each element is (R_cum, s_cum, t_cum)
+#         representing the transform from frame 0 to frame k
+#     """
+#     if not transforms:
+#         return []
+
+#     cumulative_transforms = [transforms[0]]
+
+#     for i in range(1, len(transforms)):
+#         s_cum_prev, R_cum_prev, t_cum_prev = cumulative_transforms[i - 1]
+#         s_next, R_next, t_next = transforms[i]
+#         R_cum_new = R_cum_prev @ R_next
+#         s_cum_new = s_cum_prev * s_next
+#         t_cum_new = s_cum_prev * (R_cum_prev @ t_next) + t_cum_prev
+#         cumulative_transforms.append((s_cum_new, R_cum_new, t_cum_new))
+
+#     return cumulative_transforms

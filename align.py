@@ -10,8 +10,36 @@ from geometry import (
     apply_sim3_transform,
     )
 
+# irls
+def weighted_umeyama_alignment(src, dst, w):
+    eps = 1e-8
+    w = w.astype(np.float64)
+    w = w / (np.sum(w) + eps)
 
-def weighted_umeyama_alignment(points1: np.ndarray, points2: np.ndarray, 
+    mu_src = np.sum(src * w[:, None], axis=0)
+    mu_dst = np.sum(dst * w[:, None], axis=0)
+
+    X = src - mu_src
+    Y = dst - mu_dst
+
+    Sigma_xy = (Y * w[:, None]).T @ X  # 3x3
+
+    U, S, Vt = np.linalg.svd(Sigma_xy)
+
+    D = np.eye(3)
+    if np.linalg.det(U @ Vt) < 0:
+        D[2, 2] = -1.0
+
+    R = U @ D @ Vt
+
+    var_src = np.sum(w * np.sum(X * X, axis=1))
+
+    s = float((S @ np.diag(D)) / (var_src + eps))   # S:(3,), diag(D):(3,)
+
+    t = mu_dst - s * (R @ mu_src)
+    return s, R, t
+
+def weighted_umeyama_alignment0(points1: np.ndarray, points2: np.ndarray, 
                                weights: np.ndarray) -> Tuple[float, np.ndarray, np.ndarray]:
     """
     加权Umeyama算法 - 求解加权最小二乘的Sim(3)变换
@@ -86,7 +114,7 @@ def align_two_point_clouds_irls(point_map1: np.ndarray, point_map2: np.ndarray,
                                 max_iterations: int = 20,
                                 convergence_threshold: float = 1e-6) -> Tuple[float, np.ndarray, np.ndarray]:
     """
-    使用IRLS算法对齐两个点云（基于论文算法）
+    使用IRLS算法对齐两个点云 基于论文算法
     
     Args:
         point_map1: 第一个点云 [overlap_size, H, W, 3]
@@ -109,7 +137,11 @@ def align_two_point_clouds_irls(point_map1: np.ndarray, point_map2: np.ndarray,
     confs2 = conf2.reshape(-1)
     
     # 根据论文：直接丢弃置信度低于中位数0.1的点
-    conf_threshold = min(np.median(confs1), np.median(confs2)) * 0.3
+    conf_threshold = min(np.median(confs1), np.median(confs2)) * 0.1
+    # conf_threshold = 0.6
+    print("#"*30)
+    print(f"  Align with confidence threshold: {conf_threshold}")
+    
     mask1 = confs1 > conf_threshold
     mask2 = confs2 > conf_threshold
     
@@ -185,6 +217,8 @@ def align_two_point_clouds_irls(point_map1: np.ndarray, point_map2: np.ndarray,
     
     return s, R, t
 
+
+# align api
 def align_two_point_clouds(point_map1: np.ndarray, point_map2: np.ndarray,
                           conf1: np.ndarray, conf2: np.ndarray,
                           min_points: int = 100) -> Tuple[float, np.ndarray, np.ndarray]:
@@ -205,10 +239,12 @@ def align_two_point_clouds(point_map1: np.ndarray, point_map2: np.ndarray,
     """
     # 调用新的IRLS算法
     return align_two_point_clouds_irls(point_map1, point_map2, conf1, conf2, min_points)
+    # return align_two_point_clouds_icp(point_map1, point_map2, conf1, conf2)
 
 
 
-def extract_overlap_points(chunk1_data: dict, chunk2_data: dict, 
+# help function
+def extract_overlap_chunk_prediction(prev_chunk_prediction: dict, cur_chunk_prediction: dict, 
                                           overlap_size: int) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """
     提取两个块重叠区域的点云和置信度
@@ -226,21 +262,21 @@ def extract_overlap_points(chunk1_data: dict, chunk2_data: dict,
     """
     # 第一个块的最后overlap_size帧
     point_map1 = depth_to_point_cloud_vectorized(
-        chunk1_data['depth'][-overlap_size:],
-        chunk1_data['intrinsics'][-overlap_size:],
-        chunk1_data['extrinsics'][-overlap_size:]
+        prev_chunk_prediction['depth'][-overlap_size:],
+        prev_chunk_prediction['intrinsics'][-overlap_size:],
+        prev_chunk_prediction['extrinsics'][-overlap_size:]
     )
     
     # 第二个块的前overlap_size帧
     point_map2 = depth_to_point_cloud_vectorized(
-        chunk2_data['depth'][:overlap_size],
-        chunk2_data['intrinsics'][:overlap_size],
-        chunk2_data['extrinsics'][:overlap_size]
+        cur_chunk_prediction['depth'][:overlap_size],
+        cur_chunk_prediction['intrinsics'][:overlap_size],
+        cur_chunk_prediction['extrinsics'][:overlap_size]
     )
     
     # 提取对应的置信度
-    conf1 = chunk1_data['conf'][-overlap_size:]
-    conf2 = chunk2_data['conf'][:overlap_size]
+    conf1 = prev_chunk_prediction['conf'][-overlap_size:]
+    conf2 = cur_chunk_prediction['conf'][:overlap_size]
     
     return point_map1, point_map2, conf1, conf2
 

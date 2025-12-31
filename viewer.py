@@ -67,7 +67,7 @@ class SLAMViewer:
         """设置GUI控件"""
         self.gui_show_frames = self.server.gui.add_checkbox("Show Cameras", initial_value=True)
         self.gui_points_conf = self.server.gui.add_slider(
-            "Confidence Threshold", min=0, max=100, step=0.1, initial_value=50.0
+            "Confidence Threshold", min=0, max=100, step=0.1, initial_value=65
         )
         self.gui_frame_selector = self.server.gui.add_dropdown(
             "Show Points from Frames", options=["All"], initial_value="All"
@@ -163,7 +163,7 @@ class SLAMViewer:
             self.frame_indices.extend([frame_idx] * num_points)
             self.total_points += num_points
             
-            print(f"  Added {num_points} points from frame {frame_idx}, total points: {self.total_points}")
+            # print(f"  Added {num_points} points from frame {frame_idx}, total points: {self.total_points}")
         
         # 9. 更新帧选择器
         options = ["All"] + [str(i) for i in range(frame_idx + 1)]
