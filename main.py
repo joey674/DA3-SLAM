@@ -39,22 +39,9 @@ def main():
     # 运行SLAM
     solver = SLAMSolver(image_dir,config)
     
-    try:
-        # 运行SLAM
-        solver.run()
-        
-        # 保持可视化运行
-        if not args.no_vis:
-            print("\nVisualization server is running...")
-            print(f"Open browser at: http://localhost:{args.port}")
-            solver.viewer.run(background=False)
-            
-    except KeyboardInterrupt:
-        print("\nSLAM process interrupted by user")
-    except Exception as e:
-        print(f"Error during SLAM: {e}")
-        import traceback
-        traceback.print_exc()
+    # 运行SLAM
+    solver.run()
+
 
 if __name__ == "__main__":
     main()

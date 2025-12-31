@@ -138,8 +138,6 @@ def align_two_point_clouds_irls(point_map1: np.ndarray, point_map2: np.ndarray,
     
     # 根据论文  直接丢弃置信度低于中位数0.1的点
     conf_threshold = min(np.median(confs1), np.median(confs2)) * 0.1
-    # conf_threshold = 0.6
-    print("#"*30)
     print(f"  Align with confidence threshold: {conf_threshold}")
     
     mask1 = confs1 > conf_threshold
@@ -163,7 +161,7 @@ def align_two_point_clouds_irls(point_map1: np.ndarray, point_map2: np.ndarray,
     points2_sampled = points2_filtered[indices]
     confs_sampled = np.sqrt(confs1_filtered[indices] * confs2_filtered[indices])  # 几何平均
     
-    print(f"  Using {sample_size} points for IRLS alignment")
+    print(f"  Map1 has {len(points1_filtered)},map2 has {len(points1_filtered)}; Using {sample_size} points for IRLS alignment")
     
     # 初始化变换  单位变换
     s = 1.0

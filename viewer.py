@@ -267,7 +267,7 @@ class SLAMViewer:
         if np.any(combined_mask) and len(all_points_combined) > 0:
             self.point_cloud.points = all_points_combined[combined_mask]
             self.point_cloud.colors = all_colors_combined[combined_mask]
-            print(f"  Updated point cloud: {np.sum(combined_mask)} points displayed")
+            # print(f"  Updated point cloud: {np.sum(combined_mask)} points displayed")
     
     def _toggle_camera_visibility(self):
         """切换相机可视化可见性"""
