@@ -75,7 +75,7 @@ def weighted_umeyama_alignment0(points1: np.ndarray, points2: np.ndarray,
     # 计算旋转矩阵
     R = np.dot(U, Vt)
     
-    # 确保旋转矩阵是右手系（行列式为1）
+    # 确保旋转矩阵是右手系 (行列式为1 )
     if np.linalg.det(R) < 0:
         Vt[-1, :] *= -1
         R = np.dot(U, Vt)
@@ -136,7 +136,7 @@ def align_two_point_clouds_irls(point_map1: np.ndarray, point_map2: np.ndarray,
     confs1 = conf1.reshape(-1)
     confs2 = conf2.reshape(-1)
     
-    # 根据论文：直接丢弃置信度低于中位数0.1的点
+    # 根据论文  直接丢弃置信度低于中位数0.1的点
     conf_threshold = min(np.median(confs1), np.median(confs2)) * 0.1
     # conf_threshold = 0.6
     print("#"*30)
@@ -150,12 +150,12 @@ def align_two_point_clouds_irls(point_map1: np.ndarray, point_map2: np.ndarray,
     confs1_filtered = confs1[mask1]
     confs2_filtered = confs2[mask2]
     
-    # 如果点数不足，返回单位变换
+    # 如果点数不足 返回单位变换
     if len(points1_filtered) < min_points or len(points2_filtered) < min_points:
         print(f"  Warning: Not enough points for alignment: {len(points1_filtered)} vs {len(points2_filtered)}")
         return 1.0, np.eye(3), np.zeros(3)
     
-    # 采样点以加速计算（但保留对应关系）
+    # 采样点以加速计算 (但保留对应关系 )
     sample_size = min(5000, len(points1_filtered), len(points2_filtered))
     indices = np.random.choice(len(points1_filtered), sample_size, replace=False)
     
@@ -165,7 +165,7 @@ def align_two_point_clouds_irls(point_map1: np.ndarray, point_map2: np.ndarray,
     
     print(f"  Using {sample_size} points for IRLS alignment")
     
-    # 初始化变换：单位变换
+    # 初始化变换  单位变换
     s = 1.0
     R = np.eye(3)
     t = np.zeros(3)
@@ -176,13 +176,13 @@ def align_two_point_clouds_irls(point_map1: np.ndarray, point_map2: np.ndarray,
         points2_transformed = apply_sim3_transform(points2_sampled, s, R, t)
         residuals = np.linalg.norm(points1_sampled - points2_transformed, axis=1)
         
-        # 根据公式(3)计算权重：w_i = c_i * ρ'(r_i) / r_i
+        # 根据公式(3)计算权重  w_i = c_i * ρ'(r_i) / r_i
         weights = np.zeros_like(residuals)
         for i in range(len(residuals)):
             r = residuals[i]
             c = confs_sampled[i]
             
-            # Huber损失导数部分：ρ'(r)/r
+            # Huber损失导数部分  ρ'(r)/r
             if r == 0:
                 huber_weight_val = 1.0
             else:
@@ -223,7 +223,7 @@ def align_two_point_clouds(point_map1: np.ndarray, point_map2: np.ndarray,
                           conf1: np.ndarray, conf2: np.ndarray,
                           min_points: int = 100) -> Tuple[float, np.ndarray, np.ndarray]:
     """
-    对齐两个点云（兼容旧接口）
+    对齐两个点云 (兼容旧接口 )
     
     Args:
         point_map1: 第一个点云 [overlap_size, H, W, 3]

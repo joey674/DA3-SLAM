@@ -97,7 +97,7 @@ class SLAMViewer:
         添加关键帧到可视化器
         
         Args:
-            image: 图像 (3, H, W) 或 (H, W, 3)，归一化到[0, 1]
+            image: 图像 (3, H, W) 或 (H, W, 3) 归一化到[0, 1]
             depth: 深度图 (H, W) 或 (H, W, 1)
             conf: 置信度图 (H, W)
             extrinsic: 外参矩阵 (3, 4) w2c
@@ -129,7 +129,7 @@ class SLAMViewer:
             depth[np.newaxis, ...],  # 添加batch维度
             extrinsic[np.newaxis, ...],
             intrinsic[np.newaxis, ...]
-        )[0]  # 移除batch维度，得到(H_dep, W_dep, 3)
+        )[0]  # 移除batch维度 得到(H_dep, W_dep, 3)
         
         # 5. 应用步长采样 - 确保掩码与所有数组维度匹配
         mask = np.zeros((H_dep, W_dep), dtype=bool)
@@ -140,7 +140,7 @@ class SLAMViewer:
         colors_masked = colors_uint8[mask]
         conf_masked = conf[mask] if conf.shape == (H_dep, W_dep) else np.ones(len(points_masked))
         
-        # 7. 过滤掉无效点（深度为0或NaN的点）
+        # 7. 过滤掉无效点 (深度为0或NaN的点 )
         valid_mask = (
             (points_masked[:, 2] > 0.1) &  # 深度大于0.1
             (points_masked[:, 2] < 50.0) & # 深度小于50米
@@ -177,7 +177,7 @@ class SLAMViewer:
         self._update_point_cloud()
         
     def _add_camera_visualization(self, extrinsic: np.ndarray, image: np.ndarray, frame_idx: int):
-        """添加相机可视化（坐标轴和视锥体）"""
+        """添加相机可视化 (坐标轴和视锥体 )"""
         # 将w2c转换为c2w
         cam_to_world = closed_form_inverse_se3(extrinsic[np.newaxis, ...])[0]  # (4, 4)
         

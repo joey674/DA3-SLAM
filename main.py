@@ -10,7 +10,7 @@ def main():
                         # default="/home/zhouyi/repo/dataset/office_loop",
                         help="Path to folder containing images")
     parser.add_argument("--group_size", type=int, 
-                        default=40,
+                        default=5,
                         help="Number of frames per group (default: 30)")
     parser.add_argument("--overlap_size", type=int, 
                         default=2,

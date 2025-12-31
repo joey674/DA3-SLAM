@@ -236,7 +236,7 @@ def da3_prediction_to_viser_dict(prediction, image_paths):
     
     Args:
         prediction: DepthAnything3模型的推理结果对象
-        image_paths: 输入图像路径列表，用于读取原始图像
+        image_paths: 输入图像路径列表 用于读取原始图像
     
     Returns:
         pred_dict: 符合viser_wrapper输入的字典
@@ -248,7 +248,7 @@ def da3_prediction_to_viser_dict(prediction, image_paths):
     if depth.ndim == 3:
         depth = depth[:, :, :, np.newaxis]  # 添加通道维度
     
-    # 置信度: DA3的conf可能需要调整，这里假设它直接可用
+    # 置信度: DA3的conf可能需要调整 这里假设它直接可用
     conf = prediction.conf  # 形状应为 (S, H, W)
     
     # 相机参数
@@ -260,7 +260,7 @@ def da3_prediction_to_viser_dict(prediction, image_paths):
     images = []
     for img_path in image_paths:
         # 这里需要你的图像读取和预处理逻辑
-        # 例如，使用PIL或OpenCV读取，然后调整尺寸、归一化、转换为CHW
+        # 例如 使用PIL或OpenCV读取 然后调整尺寸、归一化、转换为CHW
         import cv2
         img = cv2.imread(img_path)
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)  # 转RGB
@@ -284,7 +284,7 @@ def da3_prediction_to_viser_dict(prediction, image_paths):
         "world_points": world_points,               # (S, H, W, 3)
         "world_points_conf": conf,                  # (S, H, W)
         "depth": depth,                             # (S, H, W, 1)
-        "depth_conf": conf,                         # (S, H, W)，这里用同一个conf
+        "depth_conf": conf,                         # (S, H, W) 这里用同一个conf
         "extrinsic": extrinsics,                    # (S, 3, 4) w2c
         "intrinsic": intrinsics,                    # (S, 3, 3)
     }

@@ -54,23 +54,26 @@ def apply_sim3_transform(points: np.ndarray, s: float, R: np.ndarray, t: np.ndar
         变换后的点云
     """
     if points.ndim == 4:
-        # 批量点云 [N, H, W, 3]
-        transformed = np.einsum('ij,...j->...i', R, points)  # 旋转
-        transformed = s * transformed  # 尺度
-        transformed = transformed + t  # 平移
+        # 方法1  使用reshape确保一致性
+        original_shape = points.shape
+        points_reshaped = points.reshape(-1, 3)
+        transformed = np.dot(points_reshaped, R.T)  # 对于行向量点
+        transformed = s * transformed
+        transformed = transformed + t
+        transformed = transformed.reshape(original_shape)
+        return transformed
     else:
-        # 展平点云 [N_points, 3]
-        transformed = np.dot(points, R.T)  # 旋转
-        transformed = s * transformed  # 尺度
-        transformed = transformed + t  # 平移
-    
-    return transformed
+        # 对于行向量点 [N_points, 3]
+        transformed = np.dot(points, R.T)  # 正确  p @ R.T
+        transformed = s * transformed
+        transformed = transformed + t
+        return transformed
 
 
 def accumulate_sim3_transforms(sim3_transforms: List[Tuple[float, np.ndarray, np.ndarray]]) -> List[Tuple[float, np.ndarray, np.ndarray]]:
     """
-    累积SIM(3)变换，使每个变换都是相对于第一个块的
-        假设有两个连续的Sim(3)变换：
+    累积SIM(3)变换 使每个变换都是相对于第一个块的
+        假设有两个连续的Sim(3)变换  
 
         变换1 T1 = (s1, R1, t1), 将点从坐标系1变换到坐标系0: p0 = s1 * R1 * p1 + t1
 
@@ -93,7 +96,7 @@ def accumulate_sim3_transforms(sim3_transforms: List[Tuple[float, np.ndarray, np
     
     accumulated = []
     
-    # 第一个chunk的变换：从第一个chunk到自身的变换（单位变换）
+    # 第一个chunk的变换  从第一个chunk到自身的变换 (单位变换 )
     accumulated.append((1.0, np.eye(3), np.zeros(3)))
     
     # 对于第一个真正的变换
@@ -115,35 +118,76 @@ def accumulate_sim3_transforms(sim3_transforms: List[Tuple[float, np.ndarray, np
     
     return accumulated
 
-
 def transform_camara_extrinsics(extrinsic: np.ndarray, s: float, R: np.ndarray, t: np.ndarray) -> np.ndarray:
     """
-    根据chunk之间的变换矩阵 更新 新chunk里的相机位姿 到 旧chunk坐标系下的相机位姿
+    将相机位姿从一个chunk的坐标系变换到另一个chunk的坐标系
     
-    Args:
-        extrinsic: 原始外参矩阵 [3, 4] (w2c)
-        s: 尺度因子
-        R: 旋转矩阵 [3, 3]
-        t: 平移向量 [3]
-        
-    Returns:
-        变换后的外参矩阵 [3, 4] (w2c)
+    假设  
+    - 我们有从当前chunk到参考chunk的Sim(3)变换 p_ref = s * R @ p_cur + t
+    - 在当前chunk中 相机位姿为 w2c_cur (世界到相机 )
+    - 我们想要参考chunk坐标系中的相机位姿 w2c_ref
+    
+    推导  
+    1. 对于空间中的一点p 在参考坐标系中表示为 p_ref
+    2. 在当前坐标系中表示为 p_cur = (1/s) * R.T @ (p_ref - t)
+    3. 在相机坐标系中  p_camera = w2c_cur @ p_cur
+    4. 将p_cur用p_ref表示  p_camera = w2c_cur @ [(1/s) * R.T @ (p_ref - t)]
+    5. 整理得  p_camera = [(1/s) * w2c_cur @ R.T] @ p_ref - (1/s) * w2c_cur @ R.T @ t
+    6. 所以  w2c_ref = [(1/s) * w2c_cur @ R.T, -(1/s) * w2c_cur @ R.T @ t]
     """
-    # 将w2c转换为c2w
-    w2c_original = np.eye(4)
-    w2c_original[:3, :4] = extrinsic
-    c2w_original = np.linalg.inv(w2c_original)
+    # 当前chunk的w2c矩阵
+    w2c_cur = np.eye(4)
+    w2c_cur[:3, :4] = extrinsic
     
-    # 应用全局变换
-    c2w_global = np.eye(4)
-    c2w_global[:3, :3] = s * np.dot(R, c2w_original[:3, :3])
-    c2w_global[:3, 3] = np.dot(R, s * c2w_original[:3, 3]) + t
+    # 计算参考chunk的w2c矩阵
+    # 注意  我们用的是从当前到参考的变换 (s, R, t)
+    # 对于逆变换 (参考到当前 )  s_inv = 1/s, R_inv = R.T, t_inv = -R.T @ t / s
+    s_inv = 1.0 / s
+    R_inv = R.T
+    t_inv = -R.T @ t / s
     
-    # 转换回w2c
-    w2c_global = np.linalg.inv(c2w_global)
-    extrinsic_global = w2c_global[:3, :4]
+    # 构造从参考到当前的变换矩阵
+    T_ref_to_cur = np.eye(4)
+    T_ref_to_cur[:3, :3] = s_inv * R_inv
+    T_ref_to_cur[:3, 3] = t_inv
     
-    return extrinsic_global
+    # 组合变换  w2c_ref = w2c_cur @ T_ref_to_cur
+    w2c_ref = w2c_cur @ T_ref_to_cur
+    
+    # 提取3x4部分
+    extrinsic_ref = w2c_ref[:3, :4]
+    
+    return extrinsic_ref
+
+
+# def transform_camara_extrinsics(extrinsic: np.ndarray, s: float, R: np.ndarray, t: np.ndarray) -> np.ndarray:
+#     """
+#     根据chunk之间的变换矩阵 更新 新chunk里的相机位姿 到 旧chunk坐标系下的相机位姿
+    
+#     Args:
+#         extrinsic: 原始外参矩阵 [3, 4] (w2c)
+#         s: 尺度因子
+#         R: 旋转矩阵 [3, 3]
+#         t: 平移向量 [3]
+        
+#     Returns:
+#         变换后的外参矩阵 [3, 4] (w2c)
+#     """
+#     # 将w2c转换为c2w
+#     w2c_original = np.eye(4)
+#     w2c_original[:3, :4] = extrinsic
+#     c2w_original = np.linalg.inv(w2c_original)
+    
+#     # 应用全局变换
+#     c2w_global = np.eye(4)
+#     c2w_global[:3, :3] = s * np.dot(R, c2w_original[:3, :3])
+#     c2w_global[:3, 3] = np.dot(R, s * c2w_original[:3, 3]) + t
+    
+#     # 转换回w2c
+#     w2c_global = np.linalg.inv(c2w_global)
+#     extrinsic_global = w2c_global[:3, :4]
+    
+#     return extrinsic_global
 
 
 

@@ -59,7 +59,7 @@ def main():
         use_point_map=True,           # 使用计算出的world_points
         background_mode=False,        # 是否后台运行
         mask_sky=False,               # 是否进行天空分割 默认关闭
-        image_folder=None             # 如果启用天空分割，需要提供图像文件夹路径  默认关闭
+        image_folder=None             # 如果启用天空分割 需要提供图像文件夹路径  默认关闭
     )
     
     print("DA3 + Viser visualization is running!")

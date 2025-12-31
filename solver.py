@@ -92,14 +92,14 @@ class SLAMSolver:
         if self.chunk_count == 0:
             # 第一chunk后保留最后overlap_size帧用于下一chunk
             if len(self.frame_buffer) > self.overlap_size:
-                # 移除前chunk_size帧，保留最后overlap_size帧
+                # 移除前chunk_size帧 保留最后overlap_size帧
                 for _ in range(self.chunk_size - self.overlap_size):
                     if self.frame_buffer:
                         self.frame_buffer.popleft()
         else:
-            # 后续chunk：保留最后overlap_size帧
+            # 后续chunk  保留最后overlap_size帧
             if len(self.frame_buffer) > self.overlap_size:
-                # 移除前chunk_size帧，保留最后overlap_size帧
+                # 移除前chunk_size帧 保留最后overlap_size帧
                 for _ in range(self.chunk_size - self.overlap_size):
                     if self.frame_buffer:
                         self.frame_buffer.popleft()
@@ -121,11 +121,6 @@ class SLAMSolver:
         
         N = len(chunk_data['extrinsics'])
         
-        # 只显示第一帧和最后一帧,中间的帧先不渲染（这里之后可以再删）
-        # if N == 1:
-        #     frame_indices = [0]
-        # else:
-        #     frame_indices = [0, N-1]
         frame_indices = list(range(0, N))
         
         for i in frame_indices:
@@ -227,10 +222,10 @@ class SLAMSolver:
         """
         # 确定要处理的帧
         if self.chunk_count == 0:
-            # 第一chunk：取前chunk_size帧
+            # 第一chunk  取前chunk_size帧
             chunk_frames = list(self.frame_buffer)[:self.chunk_size]
         else:
-            # 后续chunk：缓冲区中所有帧
+            # 后续chunk  缓冲区中所有帧
             chunk_frames = list(self.frame_buffer)[:self.chunk_size]
         
         # 提取图像路径
@@ -245,11 +240,11 @@ class SLAMSolver:
         Returns:
             是否应该处理chunk
         """
-        # 第一chunk：需要收集足够的帧
+        # 第一chunk  需要收集足够的帧
         if self.chunk_count == 0:
             return len(self.frame_buffer) >= self.chunk_size
         
-        # 后续chunk：需要足够的新帧
+        # 后续chunk  需要足够的新帧
         return len(self.frame_buffer) >= self.chunk_size    
     
     def process_frame(self, image_path: str):
@@ -281,7 +276,7 @@ class SLAMSolver:
             # 添加到chunk列表
             self.chunk_prediction_list.append(cur_chunk_prediction)
             
-            # 对齐处理（如果不是第一个chunk）
+            # 对齐处理 (如果不是第一个chunk )
             if self.chunk_count > 0:
                 pre_chunk_prediction = self.chunk_prediction_list[self.chunk_count - 1]
                 s, R, t = self.process_chunk_alignment(pre_chunk_prediction, cur_chunk_prediction)
@@ -321,7 +316,7 @@ class SLAMSolver:
         for ext in extensions:
             image_paths.extend(glob.glob(os.path.join(folder_path, ext), recursive=False))
         
-        # 排序（按数字顺序）
+        # 排序 (按数字顺序 )
         def extract_number(filename):
             base = os.path.basename(filename)
             name, _ = os.path.splitext(base)

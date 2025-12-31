@@ -18,7 +18,7 @@ image_paths = [
     "/home/zhouyi/repo/dataset/sydney/000010.png"
 ]
 
-# Step 1: 处理第一帧，获取外参
+# Step 1: 处理第一帧 获取外参
 print("Step 1: Processing first frame to get extrinsics...")
 prediction_single = model.inference(
     image=[image_paths[0]],  # 只处理第一帧
@@ -37,18 +37,18 @@ else:
     print("No extrinsics estimated for first frame")
     extrinsics_frame0 = None
 
-# Step 2: 两帧一起处理，传入第一帧的外参
+# Step 2: 两帧一起处理 传入第一帧的外参
 print("\nStep 2: Processing both frames with first frame extrinsics...")
 
-# 构建外参数组：第一帧使用已知外参，第二帧设为None（让模型估计）
-# 注意：inference方法期望所有帧都有外参，所以我们提供一个初始值
+# 构建外参数组  第一帧使用已知外参 第二帧设为None (让模型估计 )
+# 注意  inference方法期望所有帧都有外参 所以我们提供一个初始值
 if extrinsics_frame0 is not None:
     extrinsics_frame1 = np.array([
         [1.0, 0.0, 0.0, 0.0],
         [0.0, 1.0, 0.0, 0.0],
         [0.0, 0.0, 1.0, 0.0]
     ], dtype=np.float32)
-    # 创建一个初始外参数组：第一帧用已知值，第二帧用单位矩阵（或零矩阵）作为初始值
+    # 创建一个初始外参数组  第一帧用已知值 第二帧用单位矩阵 (或零矩阵 )作为初始值
     extrinsics_input = np.array([
         extrinsics_frame0,  # 第一帧已知外参
         extrinsics_frame1
@@ -56,7 +56,7 @@ if extrinsics_frame0 is not None:
     
     print(f"Input extrinsics shape: {extrinsics_input.shape}")
     
-    # 运行推理，传入外参
+    # 运行推理 传入外参
     prediction_both = model.inference(
         image=image_paths,
         extrinsics=extrinsics_input,  # 传入已知的外参
@@ -131,7 +131,7 @@ if hasattr(prediction_single, 'depth') and prediction_single.depth is not None:
             axes[0, 1].set_title("Frame 0 Depth (Single)")
             axes[0, 1].axis('off')
         else:
-            # 如果是3通道，可能是可视化深度图
+            # 如果是3通道 可能是可视化深度图
             axes[0, 1].imshow(depth_single)
             axes[0, 1].set_title("Frame 0 Depth (Single)")
             axes[0, 1].axis('off')
