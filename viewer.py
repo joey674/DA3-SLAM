@@ -29,6 +29,11 @@ class SLAMViewer:
         self.frames: List[viser.FrameHandle] = []
         self.frustums: List[viser.CameraFrustumHandle] = []
         
+        # 演示模式状态：只显示/切换单个相机视角
+        self.demo_mode: bool = False
+        self.demo_index: int = 0
+        self.demo_camera_visible: bool = True  # 演示模式下当前相机的可见性
+        
         # 数据存储
         self.all_points = []
         self.all_colors = []
@@ -50,6 +55,16 @@ class SLAMViewer:
         print(f"Starting SLAM viewer on port {self.port}")
         self.server = viser.ViserServer(host="0.0.0.0", port=self.port)
         self.server.gui.configure_theme(titlebar_content=None, control_layout="collapsible")
+
+        # 给新连接的客户端一个相机导航提示：可切换到第一人称自由视角
+        @self.server.on_client_connect
+        def _(client: viser.ClientHandle) -> None:
+            client.add_notification(
+                title="相机控制提示",
+                body=(
+                    "按摄像头 Orbit 与 First-person 间切换\n"
+                )
+            )
         
         # 初始化GUI控件
         self._setup_gui()
@@ -73,6 +88,12 @@ class SLAMViewer:
             "Show Points from Frames", options=["All"], initial_value="All"
         )
         
+        # 演示模式：只显示一个相机，并可前后切换
+        self.gui_demo_mode = self.server.gui.add_button("Demo Mode")
+        self.gui_prev_view = self.server.gui.add_button("Prev View")
+        self.gui_next_view = self.server.gui.add_button("Next View")
+        self.gui_toggle_camera = self.server.gui.add_button("Toggle Camera (Show/Hide)")  # 新增按钮
+        
         # 设置回调
         @self.gui_points_conf.on_update
         def _(_) -> None:
@@ -86,6 +107,50 @@ class SLAMViewer:
         def _(_) -> None:
             self._toggle_camera_visibility()
     
+        
+        @self.gui_demo_mode.on_click
+        def _(_) -> None:
+            # 切换演示模式：只显示一个相机视角，并把所有客户端相机跳转到该视角
+            self.demo_mode = not self.demo_mode
+            if self.demo_mode:
+                self.demo_index = 0
+                self.demo_camera_visible = True  # 进入演示模式时默认显示相机
+                # 强制开启相机可视化开关（否则演示模式看不到任何相机）
+                if not self.gui_show_frames.value:
+                    self.gui_show_frames.value = True
+                self._apply_demo_view(self.demo_index)
+            else:
+                # 退出演示模式：恢复为 Show Cameras 开关控制的可见性
+                self._toggle_camera_visibility()
+
+        @self.gui_prev_view.on_click
+        def _(_) -> None:
+            if not self.demo_mode or len(self.frames) == 0:
+                return
+            self.demo_index = (self.demo_index - 1) % len(self.frames)
+            self.demo_camera_visible = True  # 切换视图时默认显示相机
+            self._apply_demo_view(self.demo_index)
+
+        @self.gui_next_view.on_click
+        def _(_) -> None:
+            if not self.demo_mode or len(self.frames) == 0:
+                return
+            self.demo_index = (self.demo_index + 1) % len(self.frames)
+            self.demo_camera_visible = True  # 切换视图时默认显示相机
+            self._apply_demo_view(self.demo_index)
+
+        @self.gui_toggle_camera.on_click  # 新增回调函数
+        def _(_) -> None:
+            if not self.demo_mode or len(self.frames) == 0:
+                return
+            # 切换当前演示相机的可见性
+            self.demo_camera_visible = not self.demo_camera_visible
+            self._apply_demo_view(self.demo_index)
+            
+            # 更新按钮文本以显示当前状态
+            state = "Hide" if self.demo_camera_visible else "Show"
+            self.gui_toggle_camera.label = f"Toggle Camera ({state})"
+
     def add_keyframe(self, 
                     image: np.ndarray, 
                     depth: np.ndarray,
@@ -221,12 +286,28 @@ class SLAMViewer:
         )
         self.frustums.append(frustum)
         
+        # 如果在演示模式，新增的相机默认隐藏（除非正好是当前演示视角）
+        if self.demo_mode:
+            self._apply_demo_view(self.demo_index)
+        
         # 添加点击回调
         @frustum.on_click
         def _(_) -> None:
+            # 点击视锥体：若在演示模式，则切到该视角；否则仅跳转相机位姿
+            if self.demo_mode:
+                self.demo_index = frame_idx
+                self.demo_camera_visible = True  # 点击时默认显示相机
+                self._apply_demo_view(self.demo_index)
+                return
             for client in self.server.get_clients().values():
-                client.camera.wxyz = frame.wxyz
-                client.camera.position = frame.position
+                # 切换到该帧对应的相机位姿。
+                # 同时把 look_at 放到相机前方，避免 Orbit 模式下视角被"锁"在全局中心点附近。
+                with client.atomic():
+                    client.camera.wxyz = frame.wxyz
+                    client.camera.position = frame.position
+                    R = viser_tf.SO3(frame.wxyz).as_matrix()
+                    forward = R @ np.array([0.0, 0.0, 1.0])
+                    client.camera.look_at = frame.position + forward
     
     def _update_point_cloud(self):
         """根据GUI设置更新点云"""
@@ -277,6 +358,31 @@ class SLAMViewer:
         for frustum in self.frustums:
             frustum.visible = visible
     
+    def _apply_demo_view(self, view_index: int) -> None:
+        """演示模式：只显示指定编号的相机(坐标轴+视锥体)，并把所有客户端相机跳转到该视角。"""
+        if len(self.frames) == 0 or len(self.frustums) == 0:
+            return
+        view_index = int(np.clip(view_index, 0, len(self.frames) - 1))
+
+        # 1) 根据demo_camera_visible状态显示或隐藏当前视角的相机
+        for i, frame in enumerate(self.frames):
+            frame.visible = (i == view_index) and self.demo_camera_visible
+        for i, frustum in enumerate(self.frustums):
+            frustum.visible = (i == view_index) and self.demo_camera_visible
+
+        # 2) 把所有客户端相机移动到该相机位姿，并把 look_at 设为相机前方
+        frame = self.frames[view_index]
+        R = viser_tf.SO3(frame.wxyz).as_matrix()
+        forward = R @ np.array([0.0, 0.0, 1.0])
+        look_at = frame.position + forward
+
+        for client in self.server.get_clients().values():
+            with client.atomic():
+                client.camera.wxyz = frame.wxyz
+                client.camera.position = frame.position
+                client.camera.look_at = look_at
+            # 目前 viser 的第一人称/轨道控制切换主要由前端按键 p 完成；这里给一个提示。
+
     def clear(self):
         """清除所有可视化数据"""
         # 清除点云

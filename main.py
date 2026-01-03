@@ -2,6 +2,7 @@
 import os
 import sys
 import argparse
+import time
 from config import load_config
 from solver import SLAMSolver
 
@@ -12,6 +13,7 @@ def main():
         type=str, 
         required=False,
         default="/home/zhouyi/repo/dataset/sydney", 
+        # default="/home/zhouyi/repo/dataset/statue", 
         help="Image path"
     )
     parser.add_argument(
@@ -41,6 +43,15 @@ def main():
     
     # 运行SLAM
     solver.run()
+    
+    
+    print("SLAM running. Press Ctrl+C to stop.")
+    try:
+        while True:
+            time.sleep(0.01)
+    except KeyboardInterrupt:
+        print("stopped by user")
+    
 
 
 if __name__ == "__main__":

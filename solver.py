@@ -15,7 +15,10 @@ from geometry import (
     transform_camara_extrinsics,
 )
 
-from utils import load_image
+from utils import (
+    load_image,
+    extract_keyframe,                   
+)
 
 
 class SLAMSolver:
@@ -301,7 +304,7 @@ class SLAMSolver:
             print(f"  Chunk {cur_chunk_prediction['chunk_idx']} processed successfully")
             
             # 等待一会
-            time.sleep(3)
+            time.sleep(self.config["Model"]["sleep_demo"])
             print("  Sleep for observation")
             print("#"*50)
    
@@ -325,6 +328,9 @@ class SLAMSolver:
         if not image_paths:
             print(f"Warning: No images found in {image_dir}")
             return
+        
+        # 抽取关键帧
+        image_paths = extract_keyframe(image_paths,self.config["Model"]["keyframe_interval"])
         
         # 流式处理每一帧
         for i, img_path in enumerate(image_paths):

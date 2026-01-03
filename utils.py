@@ -24,3 +24,30 @@ def load_image(folder_path: str) -> List[str]:
     
     print(f"Found {len(image_paths)} images in {folder_path}")
     return image_paths
+
+
+def extract_keyframe(image_paths: List[str], num_keyframe: int) -> List[str]:
+    """
+    从图像路径列表中按照固定间隔抽取关键帧
+    
+    Args:
+        image_paths: 排序后的图像路径列表
+        num_keyframe: 抽取间隔，每隔num_keyframe张抽取一张
+    
+    Returns:
+        抽取后的关键帧路径列表
+    """
+    if not image_paths:
+        return []
+    
+    if num_keyframe <= 0:
+        print(f"Warning: num_keyframe must be positive, got {num_keyframe}")
+        return image_paths  # 如果间隔为0或负数，返回所有帧
+    
+    # 使用切片操作，从第一个开始每隔num_keyframe抽取一张
+    keyframe_paths = image_paths[::num_keyframe]
+    
+    print(f"Extracted {len(keyframe_paths)} keyframes from {len(image_paths)} total frames "
+          f"(interval={num_keyframe})")
+    
+    return keyframe_paths

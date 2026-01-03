@@ -121,7 +121,7 @@ def align_two_point_clouds_irls(point_map1: np.ndarray, point_map2: np.ndarray,
         point_map2: 第二个点云 [overlap_size, H, W, 3]
         conf1: 第一个点云的置信度 [overlap_size, H, W]
         conf2: 第二个点云的置信度 [overlap_size, H, W]
-        min_points: 最小点数阈值
+        min_points: 最小筛选置信度点数阈值
         max_iterations: 最大迭代次数
         convergence_threshold: 收敛阈值
         
@@ -137,8 +137,10 @@ def align_two_point_clouds_irls(point_map1: np.ndarray, point_map2: np.ndarray,
     confs2 = conf2.reshape(-1)
     
     # 根据论文  直接丢弃置信度低于中位数0.1的点
-    conf_threshold = min(np.median(confs1), np.median(confs2)) * 0.1
-    print(f"  Align with confidence threshold: {conf_threshold}")
+    median_confs1 = np.median(confs1)
+    median_confs2 = np.median(confs2)
+    conf_threshold = min(median_confs1, median_confs2) * 0.1
+    print(f"  Conf threshold: Map1 has {median_confs1},map2 has {median_confs2}; Align with minimum confidence threshold: {conf_threshold}")
     
     mask1 = confs1 > conf_threshold
     mask2 = confs2 > conf_threshold
@@ -153,15 +155,15 @@ def align_two_point_clouds_irls(point_map1: np.ndarray, point_map2: np.ndarray,
         print(f"  Warning: Not enough points for alignment: {len(points1_filtered)} vs {len(points2_filtered)}")
         return 1.0, np.eye(3), np.zeros(3)
     
-    # 采样点以加速计算 (但保留对应关系 )
+    # 采样点以加速计算 (但保留对应关系)
     sample_size = min(5000, len(points1_filtered), len(points2_filtered))
-    indices = np.random.choice(len(points1_filtered), sample_size, replace=False)
+    indices = np.random.choice(min(len(points1_filtered), len(points2_filtered)), sample_size, replace=False)
+    
+    print(f"  Points: Map1 has {len(points1_filtered)} , map2 has {len(points1_filtered)} ; Using {sample_size} points for IRLS alignment")
     
     points1_sampled = points1_filtered[indices]
     points2_sampled = points2_filtered[indices]
     confs_sampled = np.sqrt(confs1_filtered[indices] * confs2_filtered[indices])  # 几何平均
-    
-    print(f"  Map1 has {len(points1_filtered)},map2 has {len(points1_filtered)}; Using {sample_size} points for IRLS alignment")
     
     # 初始化变换  单位变换
     s = 1.0
@@ -216,10 +218,13 @@ def align_two_point_clouds_irls(point_map1: np.ndarray, point_map2: np.ndarray,
     return s, R, t
 
 
+def filter_depth(point_map1: np.ndarray, point_map2: np.ndarray):
+    print() 
+
+
 # align api
 def align_two_point_clouds(point_map1: np.ndarray, point_map2: np.ndarray,
-                          conf1: np.ndarray, conf2: np.ndarray,
-                          min_points: int = 100) -> Tuple[float, np.ndarray, np.ndarray]:
+                          conf1: np.ndarray, conf2: np.ndarray) -> Tuple[float, np.ndarray, np.ndarray]:
     """
     对齐两个点云 (兼容旧接口 )
     
@@ -235,8 +240,10 @@ def align_two_point_clouds(point_map1: np.ndarray, point_map2: np.ndarray,
         R: 旋转矩阵 [3, 3]
         t: 平移向量 [3]
     """
-    # 调用新的IRLS算法
-    return align_two_point_clouds_irls(point_map1, point_map2, conf1, conf2, min_points)
+    
+    
+    # 调用IRLS算法
+    return align_two_point_clouds_irls(point_map1, point_map2, conf1, conf2)
     # return align_two_point_clouds_icp(point_map1, point_map2, conf1, conf2)
 
 

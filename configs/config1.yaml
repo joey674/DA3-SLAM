@@ -1,11 +1,12 @@
 Weights:
-  # DA3: '/home/zhouyi/repo/Depth-Anything-3/checkpoints/DA3NESTED-GIANT-LARGE-1.1/model.safetensors'
-  # DA3_CONFIG: '/home/zhouyi/repo/Depth-Anything-3/checkpoints/DA3NESTED-GIANT-LARGE-1.1/config.json'
-  DA3: '/home/zhouyi/repo/Depth-Anything-3/checkpoints/DA3-BASE'
-
+  # DA3: '/home/zhouyi/repo/Depth-Anything-3/checkpoints/DA3NESTED-GIANT-LARGE-1.1'
+  # DA3: '/home/zhouyi/repo/Depth-Anything-3/checkpoints/DA3-BASE'
+  DA3: '/home/zhouyi/repo/Depth-Anything-3/checkpoints/DA3-LARGE-1.1'
 Model:
+  keyframe_interval: 30 # 每n帧抽取1帧关键帧用于重构
   chunk_size: 10 # 处理块大小
-  overlap_size: 5 # Number of overlapping frames between groups (default: 15)
+  overlap_size: 1 # 
+  sleep_demo: 1000
   port: 8080
 
   Align:
