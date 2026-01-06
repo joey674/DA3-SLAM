@@ -131,7 +131,7 @@ def get_aligned_two_frame_extrinsics(prev_overlap_aligned_3x4,
                                      prev_chunk_prediction,
                                      cur_chunk_prediction):
     """
-    用 overlap 帧做 ICP，把当前 chunk 对齐到全局(初始)坐标系。
+    用 overlap 帧做 sim3，把当前 chunk 对齐到全局(初始)坐标系。
     prev_overlap_aligned_3x4: 上一个chunk overlap帧（最后一帧）的 w2c（已经是全局坐标系）
     返回：
       cur_frame0_aligned_3x4, cur_frame1_aligned_3x4, cur_overlap_aligned_lastframe_for_next
@@ -142,7 +142,7 @@ def get_aligned_two_frame_extrinsics(prev_overlap_aligned_3x4,
     pc_prev = pc_prev.reshape(-1, 3)
     pc_cur  = pc_cur.reshape(-1, 3)
 
-    # 2) ICP：cur -> prev （2=>1）
+    # 2) cur -> prev （2=>1）
     s, R, t = align_two_point_clouds(pc_cur, pc_prev)  # source=cur, target=prev
     T_prev_cur = np.eye(4, dtype=np.float64)
     T_prev_cur[:3, :3] = R
@@ -162,8 +162,21 @@ def get_aligned_two_frame_extrinsics(prev_overlap_aligned_3x4,
     # 5) 下一次对齐（比如 2-3 之后对齐 3-4）需要用“当前chunk最后一帧”的全局外参
     prev_overlap_for_next = to3x4(E1_aligned)
 
-    return to3x4(E0_aligned), to3x4(E1_aligned), prev_overlap_for_next
+    return to3x4(E0_aligned), to3x4(E1_aligned), prev_overlap_for_next,s
 
+def estimate_depth_scale(prev_chunk, cur_chunk, conf_th=0.2, eps=1e-6):
+    d_prev = prev_chunk.depth[-1]     # overlap frame in prev
+    d_cur  = cur_chunk.depth[0]       # overlap frame in cur
+
+    c_prev = prev_chunk.conf[-1] if hasattr(prev_chunk, "conf") else None
+    c_cur  = cur_chunk.conf[0]  if hasattr(cur_chunk, "conf")  else None
+
+    mask = (d_prev > eps) & (d_cur > eps) & np.isfinite(d_prev) & np.isfinite(d_cur)
+    if c_prev is not None and c_cur is not None:
+        mask &= (c_prev > conf_th) & (c_cur > conf_th)
+
+    s_depth = np.median(d_prev[mask] / d_cur[mask])
+    return float(s_depth)
 
 # So3 ICP
 def align_two_point_clouds_icp(source: np.ndarray, 
@@ -312,5 +325,10 @@ def align_two_point_clouds(source: np.ndarray,
                           threshold: float = 0.001,
                           max_iterations: int = 30) -> Tuple[float, np.ndarray, np.ndarray]:
     
-    # return align_two_point_clouds_icp(source,target,threshold,max_iterations)
-    return align_two_point_clouds_umeyama(source,target,threshold,max_iterations)
+    s,R,t = align_two_point_clouds_icp(source,target,threshold,max_iterations)
+    # s,R,t = align_two_point_clouds_umeyama(source,target,threshold,max_iterations)
+    print(f"s: {s}")
+    print(f"R: {R}")
+    print(f"t: {t}")
+    return s,R,t
+

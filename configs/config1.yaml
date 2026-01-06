@@ -4,7 +4,7 @@ Weights:
   DA3: '/home/zhouyi/repo/Depth-Anything-3/checkpoints/DA3-LARGE-1.1'
 Model:
   keyframe_interval: 1 # extract 1 frame in every n frames
-  chunk_size: 6 # frame size for a chunk >2
+  chunk_size: 40 # frame size for a chunk >2
   overlap_size: 1 # 
   sleep_demo: 20000
   port: 8080
