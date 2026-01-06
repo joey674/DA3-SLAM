@@ -3,10 +3,10 @@ Weights:
   # DA3: '/home/zhouyi/repo/Depth-Anything-3/checkpoints/DA3-BASE'
   DA3: '/home/zhouyi/repo/Depth-Anything-3/checkpoints/DA3-LARGE-1.1'
 Model:
-  keyframe_interval: 30 # 每n帧抽取1帧关键帧用于重构
-  chunk_size: 10 # 处理块大小
+  keyframe_interval: 1 # extract 1 frame in every n frames
+  chunk_size: 6 # frame size for a chunk >2
   overlap_size: 1 # 
-  sleep_demo: 1000
+  sleep_demo: 20000
   port: 8080
 
   Align:
@@ -15,6 +15,9 @@ Model:
     delta: 0.1
     max_iters: 5
     tol: 1e-9
+
+  ICP:
+
 
 Loop:
   SIM3_Optimizer:

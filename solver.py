@@ -134,6 +134,7 @@ class SLAMSolver:
             
             # 获取深度图
             depth = chunk_data['depth'][i]  # [H, W]
+            print(f"{depth.shape}")
             
             # 获取置信度图
             conf = chunk_data['conf'][i]  # [H, W]
@@ -145,7 +146,7 @@ class SLAMSolver:
             intrinsic = chunk_data['intrinsics'][i]  # [3, 3]
             
             # 添加到可视化器
-            self.viewer.add_keyframe(
+            self.viewer.add_frame(
                 image=image_chw,
                 depth=depth,
                 conf=conf,
@@ -191,21 +192,27 @@ class SLAMSolver:
         """
         print(f"  Predict single chunk {self.chunk_count} with {len(chunk_image_paths)} images through da3...")
         
-        prediction = self.model.inference(
+
+        torch.cuda.empty_cache()
+        with torch.no_grad():
+            
+            prediction = self.model.inference(
                     image=chunk_image_paths,
-                    process_res=504,
                     process_res_method="upper_bound_resize",
                 )
-        
-        with torch.no_grad():
-            torch.cuda.empty_cache()
+            
+            depth = prediction.depth
+            # depth = np.squeeze(prediction.depth)
+            # print("prediction")
+            # print(f"{prediction.depth.shape}")
+            # print(f"{depth.shape}")
             
             # 整理预测结果
             result = {
                 'chunk_idx': self.chunk_count,
                 'image_paths': chunk_image_paths,
                 'processed_images': prediction.processed_images, # [N, H, W, 3] uint8
-                'depth': np.squeeze(prediction.depth),           # [N, H, W] float32
+                'depth': depth,           # [N, H, W] float32
                 'conf': prediction.conf,                         # [N, H, W] float32
                 'extrinsics': prediction.extrinsics,             # [N, 3, 4] float32 (w2c)
                 'intrinsics': prediction.intrinsics,             # [N, 3, 3] float32
@@ -318,7 +325,7 @@ class SLAMSolver:
             folder_path: 图像文件夹路径
         """
         print("=" * 50)
-        print("Starting DA3-Streaming SLAM (Streaming Mode)...")
+        print("Starting DA3-SLAM ...")
         print("=" * 50)
         
         image_dir = self.image_dir

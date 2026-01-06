@@ -218,22 +218,76 @@ def align_two_point_clouds_irls(point_map1: np.ndarray, point_map2: np.ndarray,
     return s, R, t
 
 
-def filter_depth(point_map1: np.ndarray, point_map2: np.ndarray):
-    print() 
+# icp
+
+# umeyama
+def align_two_point_clouds_umeyama(point_map2: np.ndarray, point_map1: np.ndarray) -> Tuple[float, np.ndarray, np.ndarray]:
+    """
+    对齐两个点云（最简版本，假设点已对应）
+    
+    Args:
+        point_map1: 第一个点云 [1, H, W, 3]
+        point_map2: 第二个点云 [1, H, W, 3]
+        
+    Returns:
+        s: 尺度因子
+        R: 旋转矩阵 [3, 3]
+        t: 平移向量 [3]
+    """
+    # 提取点云数据，去除batch维度
+    points1 = point_map1[0].reshape(-1, 3)  # [H*W, 3]
+    points2 = point_map2[0].reshape(-1, 3)  # [H*W, 3]
+    
+    # 1. 计算质心
+    centroid1 = np.mean(points1, axis=0)
+    centroid2 = np.mean(points2, axis=0)
+    
+    # 2. 去中心化
+    centered1 = points1 - centroid1
+    centered2 = points2 - centroid2
+    
+    # 3. 计算尺度因子（基于距离的比值）
+    dist1 = np.linalg.norm(centered1, axis=1).sum()
+    dist2 = np.linalg.norm(centered2, axis=1).sum()
+    s = dist2 / dist1 if dist1 > 0 else 1.0
+    
+    # 4. 计算旋转矩阵（使用Kabsch算法）
+    # 去中心化且考虑尺度
+    scaled_centered1 = centered1 * s
+    
+    # 计算协方差矩阵
+    H = scaled_centered1.T @ centered2  # [3, 3]
+    
+    # 奇异值分解
+    U, _, Vt = np.linalg.svd(H)
+    
+    # 确保行列式为正值
+    d = np.linalg.det(Vt.T @ U.T)
+    S = np.eye(3)
+    if d < 0:
+        S[2, 2] = -1
+    
+    # 计算旋转矩阵
+    R = Vt.T @ S @ U.T
+    
+    # 5. 计算平移向量
+    t = centroid2 - s * (R @ centroid1.T).T
+    
+    return float(s), R, t
 
 
 # align api
 def align_two_point_clouds(point_map1: np.ndarray, point_map2: np.ndarray,
-                          conf1: np.ndarray, conf2: np.ndarray) -> Tuple[float, np.ndarray, np.ndarray]:
+                        #   conf1: np.ndarray | None, conf2: np.ndarray | None
+    ) -> Tuple[float, np.ndarray, np.ndarray]:
     """
-    对齐两个点云 (兼容旧接口 )
+    对齐两个点云 
     
     Args:
         point_map1: 第一个点云 [overlap_size, H, W, 3]
         point_map2: 第二个点云 [overlap_size, H, W, 3]
         conf1: 第一个点云的置信度 [overlap_size, H, W]
         conf2: 第二个点云的置信度 [overlap_size, H, W]
-        min_points: 最小点数阈值
         
     Returns:
         s: 尺度因子
@@ -242,9 +296,10 @@ def align_two_point_clouds(point_map1: np.ndarray, point_map2: np.ndarray,
     """
     
     
-    # 调用IRLS算法
-    return align_two_point_clouds_irls(point_map1, point_map2, conf1, conf2)
-    # return align_two_point_clouds_icp(point_map1, point_map2, conf1, conf2)
+    # return align_two_point_clouds_irls(point_map1, point_map2, conf1, conf2)
+    # return align_two_point_clouds_icp(point_map1, point_map2)
+    return align_two_point_clouds_umeyama(point_map1, point_map2) 
+    # return align_two_point_clouds_unit(point_map1, point_map2) 
 
 
 
@@ -280,8 +335,12 @@ def extract_overlap_chunk_prediction(prev_chunk_prediction: dict, cur_chunk_pred
     )
     
     # 提取对应的置信度
-    conf1 = prev_chunk_prediction['conf'][-overlap_size:]
-    conf2 = cur_chunk_prediction['conf'][:overlap_size]
+    # conf1 = prev_chunk_prediction['conf'][-overlap_size:]
+    # conf2 = cur_chunk_prediction['conf'][:overlap_size]
+    conf1 = None
+    conf2 = None
     
     return point_map1, point_map2, conf1, conf2
+
+# help function
 

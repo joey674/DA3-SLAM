@@ -62,7 +62,8 @@ class SLAMViewer:
             client.add_notification(
                 title="相机控制提示",
                 body=(
-                    "按摄像头 Orbit 与 First-person 间切换\n"
+                    "按摄像头 Orbit 与 First-person 间切换\n; \
+                     右键拖拽和左键拖拽"
                 )
             )
         
@@ -151,7 +152,7 @@ class SLAMViewer:
             state = "Hide" if self.demo_camera_visible else "Show"
             self.gui_toggle_camera.label = f"Toggle Camera ({state})"
 
-    def add_keyframe(self, 
+    def add_frame(self, 
                     image: np.ndarray, 
                     depth: np.ndarray,
                     conf: np.ndarray,
@@ -159,7 +160,7 @@ class SLAMViewer:
                     intrinsic: np.ndarray,
                     frame_idx: int):
         """
-        添加关键帧到可视化器
+        添加帧到可视化器
         
         Args:
             image: 图像 (3, H, W) 或 (H, W, 3) 归一化到[0, 1]

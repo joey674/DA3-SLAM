@@ -29,19 +29,17 @@ def main():
     config = load_config(args.config)
     image_dir = args.image_dir
     
-    # 检查路径
+    # check path
     if not os.path.exists(image_dir):
         print(f"Error: Image folder {image_dir} does not exist!")
         sys.exit(1)
     
-    # 导入路径设置
+    # project file path setting
     project_root = os.path.dirname(os.path.abspath("/home/zhouyi/repo/DA3-SLAM/"))
     sys.path.insert(0, project_root)
     
-    # 运行SLAM
+    # run slam
     solver = SLAMSolver(image_dir,config)
-    
-    # 运行SLAM
     solver.run()
     
     
