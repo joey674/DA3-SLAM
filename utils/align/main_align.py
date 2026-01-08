@@ -4,7 +4,7 @@ import time
 
 from viewer import SLAMViewer
 
-# 你自己的对齐工具
+
 from align_geometry import (
     get_aligned_two_frame_extrinsics,
     image_to_chw01,
@@ -41,8 +41,8 @@ chunkA = model.inference(image=[image0, image1], use_ray_pose=True)
 img0 = image_to_chw01(chunkA, 0)
 img1 = image_to_chw01(chunkA, 1)
 
-viewer.add_frame(img0, chunkA.depth[0], chunkA.conf[0], chunkA.extrinsics[0], chunkA.intrinsics[0], 1)
-viewer.add_frame(img1, chunkA.depth[1], chunkA.conf[1], chunkA.extrinsics[1], chunkA.intrinsics[1], 2)
+viewer.add_frame(img0, chunkA.depth[0], chunkA.conf[0], chunkA.extrinsics[0], chunkA.intrinsics[0])
+viewer.add_frame(img1, chunkA.depth[1], chunkA.conf[1], chunkA.extrinsics[1], chunkA.intrinsics[1])
 
 # 初始：上一chunk overlap(最后一帧=frame1) 的“全局外参”就是它自己（因为全局=chunkA坐标）
 prev_overlap_aligned = chunkA.extrinsics[-1]
@@ -66,8 +66,8 @@ E0_b, E1_b, prev_overlap_aligned,s = get_aligned_two_frame_extrinsics(
 )
 
 
-viewer.add_frame(img1b, chunkB.depth[0], chunkB.conf[0], E0_b, chunkB.intrinsics[0], 3)
-viewer.add_frame(img2b, chunkB.depth[1], chunkB.conf[1], E1_b, chunkB.intrinsics[1], 4)
+viewer.add_frame(img1b, chunkB.depth[0], chunkB.conf[0], E0_b, chunkB.intrinsics[0])
+viewer.add_frame(img2b, chunkB.depth[1], chunkB.conf[1], E1_b, chunkB.intrinsics[1])
 
 prev_chunk = chunkB
 
@@ -88,8 +88,8 @@ E0_c, E1_c, prev_overlap_aligned,s = get_aligned_two_frame_extrinsics(
     prev_overlap_aligned, prev_chunk, chunkC
 )
 
-viewer.add_frame(img2c, chunkC.depth[0], chunkC.conf[0], E0_c, chunkC.intrinsics[0], 5)
-viewer.add_frame(img3c, chunkC.depth[1], chunkC.conf[1], E1_c, chunkC.intrinsics[1], 6)
+viewer.add_frame(img2c, chunkC.depth[0], chunkC.conf[0], E0_c, chunkC.intrinsics[0])
+viewer.add_frame(img3c, chunkC.depth[1], chunkC.conf[1], E1_c, chunkC.intrinsics[1])
 
 prev_chunk = chunkC
 

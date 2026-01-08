@@ -41,6 +41,7 @@ class SLAMViewer:
         self.camera_poses = []
         self.frame_indices = []
         self.total_points = 0
+        self.next_frame_id = 0 
         
         # GUI控件
         self.gui_show_frames = None
@@ -157,8 +158,7 @@ class SLAMViewer:
                     depth: np.ndarray,
                     conf: np.ndarray,
                     extrinsic: np.ndarray,
-                    intrinsic: np.ndarray,
-                    frame_idx: int):
+                    intrinsic: np.ndarray):
         """
         添加帧到可视化器
         
@@ -170,6 +170,10 @@ class SLAMViewer:
             intrinsic: 内参矩阵 (3, 3)
             frame_idx: 帧索引
         """
+        
+        frame_idx = self.next_frame_id  # 使用内部ID
+        self.next_frame_id += 1 
+        
         # 1. 确保深度图为正确的形状
         if depth.ndim == 2:
             depth = depth[:, :, np.newaxis]

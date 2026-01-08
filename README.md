@@ -7,6 +7,6 @@ cd ../DA3-SLAM/ && pip install -r requirements.txt
 
 
 SLAM Solver
-python ./main_slam.py --image_dir /home/zhouyi/repo/dataset/C3VD2/cropped
+python ./main_slam.py --image_dir /home/zhouyi/repo/dataset/C3VD2/brightness
 
 point cloud alignment

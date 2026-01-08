@@ -5,61 +5,52 @@ import time
 from typing import List, Dict, Tuple
 from collections import deque
 
-from align import (
-    extract_overlap_chunk_prediction,
-    align_two_point_clouds,
-)
-
-from geometry import (
-    accumulate_sim3_transforms,
-    transform_camara_extrinsics,
-)
-
 from utils import (
     load_image,
-    extract_keyframe,                   
+    extract_keyframe,
+)
+
+# 改成新的单帧对齐辅助文件
+from align_geometry_single import (
+    get_aligned_chunk_extrinsics_single_overlap,
+    image_to_chw01,
+    estimate_depth_scale,
 )
 
 
 class SLAMSolver:
-    def __init__(self, 
+    def __init__(self,
                  image_dir,
                  config):
-        """
-        初始化SLAM求解器
-        
-        Args:
-        
-        """
         self.config = config
         self.chunk_size = self.config["Model"]["chunk_size"]
-        self.overlap_size = self.config["Model"]["overlap_size"]
+        self.overlap_size = self.config["Model"]["overlap_size"]  # 仍保留，但对齐按单帧使用
         self.image_dir = image_dir
-        
-        # 帧计数器
-        self.frame_count = 0
+
+        # 计数器
         self.chunk_count = 0
-        
+
         # 数据存储 - 流式处理
-        self.frame_buffer: deque = deque(maxlen=self.chunk_size * 2)  # 帧缓冲区
-        self.chunk_prediction_list: List[Dict] = []  # 已处理chunk数据
-        self.sim3_transforms: List[Tuple[float, np.ndarray, np.ndarray]] = []  # SIM(3)变换列表
-        self.accumulated_transforms: List[Tuple[float, np.ndarray, np.ndarray]] = []  # 累积变换列表
+        self.frame_buffer: deque = deque(maxlen=self.chunk_size * 2)
+        self.chunk_prediction_list: List[Dict] = []
         
+        # 与chunk对齐相关容器
+        self.sim3_transforms: List[Tuple[float, np.ndarray, np.ndarray]] = []  # relative to prev chunk
+        self.prev_overlap_aligned_3x4 = None # 记录“上一 chunk overlap(最后一帧)”在全局坐标系下的 w2c
+
         # 模型
         self.model = None
         self.load_model()
-        
+
         # 可视化器
         self.viewer = None
         self.init_viewer()
-    
+
     def load_model(self):
         """加载DA3模型"""
-        # 设备设置
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         print(f"Using device: {self.device}")
-        
+
         try:
             from depth_anything_3.api import DepthAnything3
             model_path = self.config["Weights"]["DA3"]
@@ -74,7 +65,7 @@ class SLAMSolver:
         except Exception as e:
             print(f"Error loading model: {e}")
             raise
-    
+
     def init_viewer(self):
         """初始化可视化器"""
         port = self.config["Model"]["port"]
@@ -86,264 +77,157 @@ class SLAMSolver:
             print(f"Failed to initialize viewer: {e}")
             self.viewer = None
 
-
-
     def update_buffer_after_chunk_processed(self):
         """处理完chunk后更新缓冲区"""
-        if self.chunk_count == 0:
-            # 第一chunk后保留最后overlap_size帧用于下一chunk
-            if len(self.frame_buffer) > self.overlap_size:
-                # 移除前chunk_size帧 保留最后overlap_size帧
-                for _ in range(self.chunk_size - self.overlap_size):
-                    if self.frame_buffer:
-                        self.frame_buffer.popleft()
-        else:
-            # 后续chunk  保留最后overlap_size帧
-            if len(self.frame_buffer) > self.overlap_size:
-                # 移除前chunk_size帧 保留最后overlap_size帧
-                for _ in range(self.chunk_size - self.overlap_size):
-                    if self.frame_buffer:
-                        self.frame_buffer.popleft()
-    
-    def update_viewer(self, chunk_data: Dict, transform: Tuple[float, np.ndarray, np.ndarray]):
+        if len(self.frame_buffer) > self.overlap_size:
+            for _ in range(self.chunk_size - self.overlap_size):
+                if self.frame_buffer:
+                    self.frame_buffer.popleft()
+
+    def update_viewer(self, chunk_prediction: Dict):
         """
-        更新可视化器
-        Args:
-            chunk_data: chunk的数据
-            transform: 这个chunk相对于全局坐标系(也就是第一个chunk)的变换
-            
-        Returns:
-            s: 尺度因子
-            R: 旋转矩阵 [3, 3]
-            t: 平移向量 [3]
+        按 chunk_prediction 里的 extrinsics_global 渲染所有帧（包含 overlap 帧，行为与 main_align 一致）
         """
         if self.viewer is None:
             return
-        
-        N = len(chunk_data['extrinsics'])
-        
-        frame_indices = list(range(0, N))
-        
-        for i in frame_indices:
-            # 计算帧索引
-            frame_idx = self.frame_count - len(self.frame_buffer) - (self.chunk_size - N) + i
-            
-            # 提取原始图像 需要转换为CHW格式
-            image_hwc = chunk_data['processed_images'][i]  # [H, W, 3]
-            image_chw = image_hwc.transpose(2, 0, 1) / 255.0  # [3, H, W] 归一化
-            
-            # 获取深度图
-            depth = chunk_data['depth'][i]  # [H, W]
-            print(f"{depth.shape}")
-            
-            # 获取置信度图
-            conf = chunk_data['conf'][i]  # [H, W]
-            
-            # 获取变换后的外参
-            extrinsic_global = transform_camara_extrinsics(chunk_data['extrinsics'][i], *transform)
-            
-            # 获取内参
-            intrinsic = chunk_data['intrinsics'][i]  # [3, 3]
-            
-            # 添加到可视化器
+
+        extrinsics_global = chunk_prediction.get("extrinsics_global", None)
+        if extrinsics_global is None:
+            # fallback：如果没对齐字段，就用原始 extrinsics
+            extrinsics_global = chunk_prediction["extrinsics"]
+
+        n = len(chunk_prediction["image_paths"])
+        for i in range(n):
+            image_chw = image_to_chw01(chunk_prediction, i)
+            depth = chunk_prediction["depth"][i]
+            conf = chunk_prediction["conf"][i]
+            intrinsic = chunk_prediction["intrinsics"][i]
+            extrinsic_global = extrinsics_global[i]
+
             self.viewer.add_frame(
                 image=image_chw,
                 depth=depth,
                 conf=conf,
                 extrinsic=extrinsic_global,
                 intrinsic=intrinsic,
-                frame_idx=frame_idx
             )
-    
+
     def process_chunk_alignment(self, prev_chunk_prediction: Dict, cur_chunk_prediction: Dict) -> Tuple[float, np.ndarray, np.ndarray]:
         """
-        处理chunk对齐
-        
-        Args:
-            prev_chunk_prediction: 前一个chunk的数据
-            cur_chunk_prediction: 当前chunk的数据
-            
-        Returns:
-            s: 尺度因子
-            R: 旋转矩阵 [3, 3]
-            t: 平移向量 [3]
+        单帧 overlap 对齐：
+          1) 用 estimate_depth_scale 做深度尺度对齐（乘到 cur_chunk.depth 上）
+          2) 用 prev(last) vs cur(first) 的点云做 ICP 求 R,t
+          3) 计算 cur chunk 所有帧的 extrinsics_global 相对于第一帧的世界坐标系
+          4) 更新 self.prev_overlap_aligned_3x4 = cur chunk 最后一帧全局外参
         """
-        print(f"  Aligning chunk {self.chunk_count} with previous chunk...")
-        
-        # 提取重叠区域点云和置信度
-        point_map1, point_map2, conf1, conf2 = extract_overlap_chunk_prediction(
-            prev_chunk_prediction, cur_chunk_prediction, self.overlap_size
+        # --- 先做尺度对齐（按 overlap 单帧）---
+        s_depth = estimate_depth_scale(prev_chunk_prediction, cur_chunk_prediction, conf_th=0.2)
+        cur_chunk_prediction["depth"] = cur_chunk_prediction["depth"] * s_depth
+
+        # --- 计算当前 chunk 全局外参链 ---
+        extrinsics_global, prev_overlap_for_next, (s, R, t) = get_aligned_chunk_extrinsics_single_overlap(
+            prev_overlap_aligned_3x4=self.prev_overlap_aligned_3x4,
+            prev_chunk_prediction=prev_chunk_prediction,
+            cur_chunk_prediction=cur_chunk_prediction,
         )
-        
-        # 对齐点云
-        s, R, t = align_two_point_clouds(point_map1, point_map2, conf1, conf2)
+
+        cur_chunk_prediction["extrinsics_global"] = extrinsics_global
+        self.prev_overlap_aligned_3x4 = prev_overlap_for_next
 
         return s, R, t
-    
+
     def run_single_chunk_prediction(self, chunk_image_paths: List[str]) -> Dict:
         """
         处理单个块
-        
-        Args:
-            chunk_image_paths: 块内图像路径列表
-            
-        Returns:
-            预测结果字典
         """
-        print(f"  Predict single chunk {self.chunk_count} with {len(chunk_image_paths)} images through da3...")
-        
+        print(f"  Predict single chunk with {len(chunk_image_paths)} images through da3...")
 
         torch.cuda.empty_cache()
         with torch.no_grad():
-            
             prediction = self.model.inference(
-                    image=chunk_image_paths,
-                    process_res_method="upper_bound_resize",
-                )
-            
-            depth = prediction.depth
-            # depth = np.squeeze(prediction.depth)
-            # print("prediction")
-            # print(f"{prediction.depth.shape}")
-            # print(f"{depth.shape}")
-            
-            # 整理预测结果
+                image=chunk_image_paths,
+                process_res_method="upper_bound_resize",
+            )
+
             result = {
-                'chunk_idx': self.chunk_count,
-                'image_paths': chunk_image_paths,
-                'processed_images': prediction.processed_images, # [N, H, W, 3] uint8
-                'depth': depth,           # [N, H, W] float32
-                'conf': prediction.conf,                         # [N, H, W] float32
-                'extrinsics': prediction.extrinsics,             # [N, 3, 4] float32 (w2c)
-                'intrinsics': prediction.intrinsics,             # [N, 3, 3] float32
+                "chunk_idx": self.chunk_count,
+                "image_paths": chunk_image_paths,
+                "processed_images": prediction.processed_images,  # [N,H,W,3] uint8
+                "depth": prediction.depth,                        # [N,H,W]
+                "conf": prediction.conf,                          # [N,H,W]
+                "extrinsics": prediction.extrinsics,              # [N,3,4] w2c (local chunk coords)
+                "intrinsics": prediction.intrinsics,              # [N,3,3]
             }
-            
-            
             return result
-               
+
     def load_chunk_image_paths(self) -> List[str]:
         """
         从缓冲区准备chunk数据
-        
-        Returns:
-            chunk_image_paths: chunk内的图像路径列表
         """
-        # 确定要处理的帧
-        if self.chunk_count == 0:
-            # 第一chunk  取前chunk_size帧
-            chunk_frames = list(self.frame_buffer)[:self.chunk_size]
-        else:
-            # 后续chunk  缓冲区中所有帧
-            chunk_frames = list(self.frame_buffer)[:self.chunk_size]
-        
-        # 提取图像路径
-        chunk_image_paths = [frame['path'] for frame in chunk_frames]
-        
-        return chunk_image_paths
-    
+        chunk_frames = list(self.frame_buffer)[:self.chunk_size]
+        return chunk_frames
+
     def should_run_chunk_prediction(self) -> bool:
         """
         判断是否应该处理当前chunk
-        
-        Returns:
-            是否应该处理chunk
         """
-        # 第一chunk  需要收集足够的帧
-        if self.chunk_count == 0:
-            return len(self.frame_buffer) >= self.chunk_size
-        
-        # 后续chunk  需要足够的新帧
-        return len(self.frame_buffer) >= self.chunk_size    
-    
+        return len(self.frame_buffer) >= self.chunk_size
+
     def process_frame(self, image_path: str):
         """
         处理一帧图像
-        
-        Args:
-            image_path: 图像路径
         """
-        self.frame_count += 1
-        
-        # 存储图像路径到frame_buffer
-        frame_data = {
-            'idx': self.frame_count,
-            'path': image_path,
-        }
-        self.frame_buffer.append(frame_data)
-        
-        # 检查是否需要处理chunk
+        self.frame_buffer.append(image_path)
+
         if self.should_run_chunk_prediction():
             print(f"\n  Processing chunk {self.chunk_count}...")
-            
-            # 准备chunk数据
+
             chunk_image_paths = self.load_chunk_image_paths()
-            
-            # 处理chunk
             cur_chunk_prediction = self.run_single_chunk_prediction(chunk_image_paths)
-            
-            # 添加到chunk列表
             self.chunk_prediction_list.append(cur_chunk_prediction)
-            
-            # 对齐处理 (如果不是第一个chunk )
-            if self.chunk_count > 0:
-                pre_chunk_prediction = self.chunk_prediction_list[self.chunk_count - 1]
-                s, R, t = self.process_chunk_alignment(pre_chunk_prediction, cur_chunk_prediction)
-                self.sim3_transforms.append((s, R, t))
-            
-            # 更新累积变换
-            self.accumulated_transforms = accumulate_sim3_transforms(self.sim3_transforms)
-            
-            # 获取当前chunk的变换(相对于第一个chunk的变换)
+
             if self.chunk_count == 0:
-                transform = (1.0, np.eye(3), np.zeros(3))
+                # 第一 chunk：定义为全局坐标系（global = local）
+                cur_chunk_prediction["extrinsics_global"] = cur_chunk_prediction["extrinsics"]
+
+                # 初始化 prev_overlap_aligned 为第一 chunk 最后一帧
+                self.prev_overlap_aligned_3x4 = cur_chunk_prediction["extrinsics_global"][-1]
+
+                # identity transform 占位，避免后面取 [-1] 崩
+                self.sim3_transforms.append((1.0, np.eye(3, dtype=np.float64), np.zeros(3, dtype=np.float64)))
             else:
-                transform = self.accumulated_transforms[self.chunk_count]
-            
-            # 更新可视化
-            self.update_viewer(cur_chunk_prediction, transform)
-            
+                prev_chunk_prediction = self.chunk_prediction_list[self.chunk_count - 1]
+                s, R, t = self.process_chunk_alignment(prev_chunk_prediction, cur_chunk_prediction)
+                self.sim3_transforms.append((s, R, t))
+
+            # 更新可视化（用 extrinsics_global）
+            self.update_viewer(cur_chunk_prediction)
+
             # 更新缓冲区
             self.update_buffer_after_chunk_processed()
-            
-            # 增加chunk计数
+
+            # chunk + 1
             self.chunk_count += 1
-            
-            print(f"  Chunk {cur_chunk_prediction['chunk_idx']} processed successfully")
-            
-            # 等待一会
-            time.sleep(self.config["Model"]["sleep_demo"])
+
+            time.sleep(self.config["Model"]["sleep_between_chunk"])
             print("  Sleep for observation")
-            print("#"*50)
-   
-   
+            print("#" * 50)
 
     def run(self):
-        """
-        运行完整的SLAM流程 流式处理
-        
-        Args:
-            folder_path: 图像文件夹路径
-        """
         print("=" * 50)
         print("Starting DA3-SLAM ...")
         print("=" * 50)
-        
-        image_dir = self.image_dir
-        
-        # 加载所有图像路径
-        image_paths = load_image(image_dir)
+
+        image_paths = load_image(self.image_dir)
         if not image_paths:
-            print(f"Warning: No images found in {image_dir}")
+            print(f"Warning: No images found in {self.image_dir}")
             return
-        
-        # 抽取关键帧
-        image_paths = extract_keyframe(image_paths,self.config["Model"]["keyframe_interval"])
-        
-        # 流式处理每一帧
-        for i, img_path in enumerate(image_paths):
+
+        image_paths = extract_keyframe(image_paths, self.config["Model"]["keyframe_interval"])
+
+        for img_path in image_paths:
             self.process_frame(img_path)
-        
-        # 完成处理
-        print("\n" + "=" * 50)
+
+        print("=" * 50)
         print("SLAM process completed!")
         print("=" * 50)
