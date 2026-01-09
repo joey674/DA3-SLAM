@@ -2,193 +2,7 @@ import torch
 import numpy as np
 from typing import Tuple
 import open3d as o3d
-
-def depth_to_point_cloud_vectorized(depth, intrinsics, extrinsics, device=None, in_coords = "world"):
-    """
-    depth: [N, H, W] numpy array or torch tensor
-    intrinsics: [N, 3, 3] numpy array or torch tensor
-    extrinsics: [N, 3, 4] (w2c) numpy array or torch tensor
-    Returns: point_cloud: [N, H, W, 3] same type as input
-    """
-    assert in_coords in ("camera", "world")
-    
-    input_is_numpy = False
-    if isinstance(depth, np.ndarray):
-        input_is_numpy = True
-
-        depth_tensor = torch.tensor(depth, dtype=torch.float32)
-        intrinsics_tensor = torch.tensor(intrinsics, dtype=torch.float32)
-        extrinsics_tensor = torch.tensor(extrinsics, dtype=torch.float32)
-
-        if device is not None:
-            depth_tensor = depth_tensor.to(device)
-            intrinsics_tensor = intrinsics_tensor.to(device)
-            extrinsics_tensor = extrinsics_tensor.to(device)
-    else:
-        depth_tensor = depth
-        intrinsics_tensor = intrinsics
-        extrinsics_tensor = extrinsics
-
-    if device is not None:
-        depth_tensor = depth_tensor.to(device)
-        intrinsics_tensor = intrinsics_tensor.to(device)
-        extrinsics_tensor = extrinsics_tensor.to(device)
-
-    # main logic
-
-    N, H, W = depth_tensor.shape
-
-    device = depth_tensor.device
-
-    u = torch.arange(W, device=device).float().view(1, 1, W, 1).expand(N, H, W, 1)
-    v = torch.arange(H, device=device).float().view(1, H, 1, 1).expand(N, H, W, 1)
-    ones = torch.ones((N, H, W, 1), device=device)
-    pixel_coords = torch.cat([u, v, ones], dim=-1)
-
-    intrinsics_inv = torch.inverse(intrinsics_tensor)  # [N, 3, 3]
-    camera_coords = torch.einsum("nij,nhwj->nhwi", intrinsics_inv, pixel_coords)
-    camera_coords = camera_coords * depth_tensor.unsqueeze(-1)
-    camera_coords_homo = torch.cat([camera_coords, ones], dim=-1)
-
-    extrinsics_4x4 = torch.zeros(N, 4, 4, device=device)
-    extrinsics_4x4[:, :3, :4] = extrinsics_tensor
-    extrinsics_4x4[:, 3, 3] = 1.0
-
-    if in_coords == "camera":
-        point_cloud = camera_coords
-    else:  # in_coords == "world"
-        c2w = torch.inverse(extrinsics_4x4)
-        world_coords_homo = torch.einsum("nij,nhwj->nhwi", c2w, camera_coords_homo)
-        point_cloud = world_coords_homo[..., :3]
-
-    if input_is_numpy:
-        point_cloud = point_cloud.cpu().numpy()
-        
-    return point_cloud
-
-
-def extract_overlap_point_cloud(prev_chunk_prediction, cur_chunk_prediction) -> Tuple[np.ndarray, np.ndarray]:
-    """
-    提取两个块重叠区域的点云和置信度
-    
-    Args:
-        prev_chunk_prediction: 第一个块的数据 
-        cur_chunk_prediction: 第二个块的数据
-        
-    Returns:
-        point_map1: 第一个块重叠区域的点云 [overlap_size, H, W, 3]
-        point_map2: 第二个块重叠区域的点云 [overlap_size, H, W, 3]
-    """
-    # 第一个块的最后overlap_size帧
-    point_map1 = depth_to_point_cloud_vectorized(
-        prev_chunk_prediction.depth[-1:],
-        prev_chunk_prediction.intrinsics[-1:],
-        prev_chunk_prediction.extrinsics[-1:],
-        in_coords="camera"
-    )
-    
-    # 第二个块的前overlap_size帧
-    point_map2 = depth_to_point_cloud_vectorized(
-        cur_chunk_prediction.depth[:1],
-        cur_chunk_prediction.intrinsics[:1],
-        cur_chunk_prediction.extrinsics[:1],
-        in_coords="camera"
-    )
-    
-    print(f"point_map1: {point_map1.shape}")
-    print(f"point_map2: {point_map1.shape}")
-    
-    return point_map1, point_map2
-
-
-def get_transformed_extrisinc(pre_chunk_extrinsics,s,R,t) -> np.ndarray:
-    def to4x4(E3x4):
-        E = np.eye(4)
-        E[:3, :4] = E3x4
-        return E
-    T_c1_c2 = np.eye(4)
-    T_c1_c2[:3,:3] = R
-    T_c1_c2[:3, 3] = t
-    E1 = to4x4(pre_chunk_extrinsics)   # w2c1
-    E2_aligned = np.linalg.inv(T_c1_c2) @ E1           # w2c2（对齐后的）
-    transformed_extrinsic = E2_aligned[:3, :4]
-    return transformed_extrinsic
-
-
-def to4x4(E3x4):
-    E = np.eye(4, dtype=np.float64)
-    E[:3, :4] = E3x4
-    return E
-
-def to3x4(E4x4):
-    return E4x4[:3, :4]
-
-def images_to_chw01(images):
-    """
-    将图像数组批量转换为 [N, 3, H, W] 格式并归一化到 [0, 1]
-    """
-    # 批量转换：将 [N, H, W, 3] 转换为 [N, 3, H, W]
-    return images.transpose(0, 3, 1, 2) / 255.0
-
-def estimate_depth_scale(prev_chunk, cur_chunk, conf_th=0.2, eps=1e-6):
-    d_prev = prev_chunk.depth[-1]     # overlap frame in prev
-    d_cur  = cur_chunk.depth[0]       # overlap frame in cur
-
-    c_prev = prev_chunk.conf[-1] if hasattr(prev_chunk, "conf") else None
-    c_cur  = cur_chunk.conf[0]  if hasattr(cur_chunk, "conf")  else None
-
-    mask = (d_prev > eps) & (d_cur > eps) & np.isfinite(d_prev) & np.isfinite(d_cur)
-    if c_prev is not None and c_cur is not None:
-        mask &= (c_prev > conf_th) & (c_cur > conf_th)
-
-    s_depth = np.median(d_prev[mask] / d_cur[mask])
-    return float(s_depth)
-
-def compute_aligned_chunk_extrinsics_from_prev_overlap(
-    overlap_frame_global_extrinsics_for_next_align: np.ndarray,
-    cur_chunk_local_extrinsics: np.ndarray,
-    point_cloud_transform: np.ndarray,
-):
-    """
-    根据：
-      - overlap_frame_global_extrinsics_for_next_align: 上一chunk overlap(最后一帧) 的 全局 w2c
-      - cur_chunk_local_extrinsics:   当前chunk每帧的 局部 w2c (N,3,4)，world=chunk局部
-      - point_cloud_transform:      ICP得到的点变换: p_prev ≈ R p_cur + t
-    推出：
-      - cur_chunk_frame_extrinsics_aligned_3x4: 当前chunk每帧的 全局 w2c (N,3,4)
-    """
-
-    def to4x4(E3x4):
-        E = np.eye(4, dtype=np.float64)
-        E[:3, :4] = E3x4
-        return E
-
-    def to3x4(E4x4):
-        return E4x4[:3, :4]
-
-    # ---- A) 先把 prev overlap 的全局 w2c 提到 4x4 ----
-    E_prev_global = to4x4(overlap_frame_global_extrinsics_for_next_align)  # w2c(prev overlap, global)
-
-    # ---- B) 由 ICP 变换把 cur overlap(=cur frame0) 的全局 w2c 求出来 ----
-    # 关键关系：E_prev_global = Transform_prev_from_cur * E_cur0_global
-    # => E_cur0_global = inv(Transform_prev_from_cur) * E_prev_global
-    E_cur0_global = np.linalg.inv(point_cloud_transform) @ E_prev_global
-
-    # ---- C) 利用 chunk 内部的相对位姿，把 cur0 推到 cur_i（仍然 w2c）----
-    # T_ci_from_c0 = E_i_local * inv(E_0_local)      (注意这里 E 都是 w2c)
-    # E_i_global   = T_ci_from_c0 * E_0_global
-    E0_local = to4x4(cur_chunk_local_extrinsics[0])
-    E0_local_inv = np.linalg.inv(E0_local)
-
-    aligned_list = []
-    for i in range(cur_chunk_local_extrinsics.shape[0]):
-        Ei_local = to4x4(cur_chunk_local_extrinsics[i])
-        T_ci_from_c0 = Ei_local @ E0_local_inv
-        Ei_global = T_ci_from_c0 @ E_cur0_global
-        aligned_list.append(to3x4(Ei_global))
-
-    return np.stack(aligned_list, axis=0)  # (N,3,4)
-
+###############################################
 # So3 ICP
 def align_two_point_clouds_icp(source: np.ndarray, 
                           target: np.ndarray,
@@ -356,3 +170,183 @@ def align_two_point_clouds(source: np.ndarray,
     print(f"t: {t}")
     return s,R,t
 
+
+###############################################
+# main align logic
+def depth_to_point_cloud_vectorized(depth, intrinsics, extrinsics, device=None, in_coords = "camera") -> np.ndarray:
+    """
+    Convert depth map to point cloud.
+    Args:
+        depth: [N, H, W] numpy array or torch tensor
+        intrinsics: [N, 3, 3] numpy array or torch tensor
+        extrinsics: [N, 3, 4] (w2c) numpy array or torch tensor
+    Returns: 
+        point_cloud: [N, H, W, 3] same type as input
+    """
+    assert in_coords in ("camera", "world")
+    
+    input_is_numpy = False
+    if isinstance(depth, np.ndarray):
+        input_is_numpy = True
+
+        depth_tensor = torch.tensor(depth, dtype=torch.float32)
+        intrinsics_tensor = torch.tensor(intrinsics, dtype=torch.float32)
+        extrinsics_tensor = torch.tensor(extrinsics, dtype=torch.float32)
+
+        if device is not None:
+            depth_tensor = depth_tensor.to(device)
+            intrinsics_tensor = intrinsics_tensor.to(device)
+            extrinsics_tensor = extrinsics_tensor.to(device)
+    else:
+        depth_tensor = depth
+        intrinsics_tensor = intrinsics
+        extrinsics_tensor = extrinsics
+
+    if device is not None:
+        depth_tensor = depth_tensor.to(device)
+        intrinsics_tensor = intrinsics_tensor.to(device)
+        extrinsics_tensor = extrinsics_tensor.to(device)
+
+    # main logic
+
+    N, H, W = depth_tensor.shape
+
+    device = depth_tensor.device
+
+    u = torch.arange(W, device=device).float().view(1, 1, W, 1).expand(N, H, W, 1)
+    v = torch.arange(H, device=device).float().view(1, H, 1, 1).expand(N, H, W, 1)
+    ones = torch.ones((N, H, W, 1), device=device)
+    pixel_coords = torch.cat([u, v, ones], dim=-1)
+
+    intrinsics_inv = torch.inverse(intrinsics_tensor)  # [N, 3, 3]
+    camera_coords = torch.einsum("nij,nhwj->nhwi", intrinsics_inv, pixel_coords)
+    camera_coords = camera_coords * depth_tensor.unsqueeze(-1)
+    camera_coords_homo = torch.cat([camera_coords, ones], dim=-1)
+
+    extrinsics_4x4 = torch.zeros(N, 4, 4, device=device)
+    extrinsics_4x4[:, :3, :4] = extrinsics_tensor
+    extrinsics_4x4[:, 3, 3] = 1.0
+
+    if in_coords == "camera":
+        point_cloud = camera_coords
+    else:  # in_coords == "world"
+        c2w = torch.inverse(extrinsics_4x4)
+        world_coords_homo = torch.einsum("nij,nhwj->nhwi", c2w, camera_coords_homo)
+        point_cloud = world_coords_homo[..., :3]
+
+    if input_is_numpy:
+        point_cloud = point_cloud.cpu().numpy()
+        
+    return point_cloud
+
+
+def extract_overlap_point_cloud(prev_chunk_prediction, cur_chunk_prediction) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    提取两个块重叠区域的点云和置信度
+    
+    Args:
+        - prev_chunk_prediction: 第一个块的数据 
+        - cur_chunk_prediction: 第二个块的数据
+        
+    Returns:
+        - point_map1: [1, H, W, 3] , 
+        - point_map2: [1, H, W, 3] 
+    """
+    # 第一个块的最后overlap_size帧
+    point_map1 = depth_to_point_cloud_vectorized(
+        prev_chunk_prediction.depth[-1:],
+        prev_chunk_prediction.intrinsics[-1:],
+        prev_chunk_prediction.extrinsics[-1:],
+        in_coords="camera"
+    )
+    
+    # 第二个块的前overlap_size帧
+    point_map2 = depth_to_point_cloud_vectorized(
+        cur_chunk_prediction.depth[:1],
+        cur_chunk_prediction.intrinsics[:1],
+        cur_chunk_prediction.extrinsics[:1],
+        in_coords="camera"
+    )
+    
+    print(f"point_map1: {point_map1.shape}")
+    print(f"point_map2: {point_map1.shape}")
+    
+    return point_map1, point_map2
+
+
+def images_to_chw01(images) -> np.ndarray: 
+    """
+    Args:
+        images: (N, H, W, 3)
+            N 图片数量
+            H 高度
+            W 宽度
+            3 RGB 三个通道
+    Returns:
+        images_chw01: (N, 3, H, W) pytorch常用图片格式(通道放前面), 且归一化到0-1之间
+    """
+    return images.transpose(0, 3, 1, 2) / 255.0
+
+
+def estimate_depth_scale(prev_chunk, cur_chunk, conf_th=0.2, eps=1e-6) -> float:
+    """
+    估计当前块相对于前一块的深度尺度因子
+    Args:
+        prev_chunk: 前一块的深度预测结果
+        cur_chunk: 当前块的深度预测结果
+        conf_th: 置信度阈值
+        eps: 深度有效性阈值
+    Returns:
+        - s_depth: 深度尺度因子
+    """
+    
+    d_prev = prev_chunk.depth[-1]     
+    d_cur  = cur_chunk.depth[0]       
+
+    c_prev = prev_chunk.conf[-1] if hasattr(prev_chunk, "conf") else None
+    c_cur  = cur_chunk.conf[0]  if hasattr(cur_chunk, "conf")  else None
+
+    mask = (d_prev > eps) & (d_cur > eps) & np.isfinite(d_prev) & np.isfinite(d_cur)
+    if c_prev is not None and c_cur is not None:
+        mask &= (c_prev > conf_th) & (c_cur > conf_th)
+
+    s_depth = np.median(d_prev[mask] / d_cur[mask])
+    return float(s_depth)
+
+
+def compute_aligned_chunk_extrinsics_from_prev_overlap(
+    overlap_frame_global_extrinsics_for_next_align: np.ndarray,
+    cur_chunk_local_extrinsics: np.ndarray,
+    point_cloud_transform: np.ndarray,
+) -> np.ndarray:
+    """
+    Args:
+        overlap_frame_global_extrinsics_for_next_align: (3, 4) 上一chunk overlap 
+        cur_chunk_local_extrinsics: (N,3,4) 当前chunk内的局部 extrinsics 
+        point_cloud_transform: (4,4) 点云配准得到的变换
+    Returns:
+        cur_chunk_global_extrinsics: (N,3,4)
+    """
+
+    def to4x4(E3x4):
+        E = np.eye(4, dtype=np.float64)
+        E[:3, :4] = E3x4
+        return E
+
+    def to3x4(E4x4):
+        return E4x4[:3, :4]
+
+    E_prev_global = to4x4(overlap_frame_global_extrinsics_for_next_align)  
+    E_cur0_global = np.linalg.inv(point_cloud_transform) @ E_prev_global
+
+    E0_local = to4x4(cur_chunk_local_extrinsics[0])
+    E0_local_inv = np.linalg.inv(E0_local)
+
+    aligned_list = []
+    for i in range(cur_chunk_local_extrinsics.shape[0]):
+        Ei_local = to4x4(cur_chunk_local_extrinsics[i])
+        T_ci_from_c0 = Ei_local @ E0_local_inv
+        Ei_global = T_ci_from_c0 @ E_cur0_global
+        aligned_list.append(to3x4(Ei_global))
+
+    return np.stack(aligned_list, axis=0)  
