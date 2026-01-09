@@ -3,10 +3,10 @@ Weights:
   # DA3: '/home/zhouyi/repo/Depth-Anything-3/checkpoints/DA3-BASE'
   DA3: '/home/zhouyi/repo/Depth-Anything-3/checkpoints/DA3-LARGE-1.1'
 Model:
-  keyframe_interval: 5 # extract 1 frame in every n frames
-  chunk_size: 20 # frame size for a chunk >2
+  keyframe_interval: 1 # extract 1 frame in every n frames
+  chunk_size: 15 # frame size for a chunk >2
   overlap_size: 1 # 
-  sleep_between_chunk: 60
+  sleep_between_chunk: 10
   port: 8080
 
   Align:

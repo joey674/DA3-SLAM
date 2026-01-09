@@ -123,46 +123,12 @@ def to4x4(E3x4):
 def to3x4(E4x4):
     return E4x4[:3, :4]
 
-def image_to_chw01(pred, idx):
-    img_hwc = pred.processed_images[idx]          # [H,W,3] uint8
-    return img_hwc.transpose(2, 0, 1) / 255.0     # [3,H,W] float
-
-def get_aligned_two_frame_extrinsics(prev_overlap_aligned_3x4,
-                                     prev_chunk_prediction,
-                                     cur_chunk_prediction):
+def images_to_chw01(images):
     """
-    用 overlap 帧做 sim3，把当前 chunk 对齐到全局(初始)坐标系。
-    prev_overlap_aligned_3x4: 上一个chunk overlap帧（最后一帧）的 w2c（已经是全局坐标系）
-    返回：
-      cur_frame0_aligned_3x4, cur_frame1_aligned_3x4, cur_overlap_aligned_lastframe_for_next
+    将图像数组批量转换为 [N, 3, H, W] 格式并归一化到 [0, 1]
     """
-
-    # 1) 取 overlap 点云（必须 camera coords）
-    pc_prev, pc_cur = extract_overlap_point_cloud(prev_chunk_prediction, cur_chunk_prediction)
-    pc_prev = pc_prev.reshape(-1, 3)
-    pc_cur  = pc_cur.reshape(-1, 3)
-
-    # 2) cur -> prev （2=>1）
-    s, R, t = align_two_point_clouds(pc_cur, pc_prev)  # source=cur, target=prev
-    T_prev_cur = np.eye(4, dtype=np.float64)
-    T_prev_cur[:3, :3] = R
-    T_prev_cur[:3, 3]  = t
-
-    # 3) 由 prev 的全局外参推 cur overlap(第0帧) 的全局外参（w2c）
-    E_prev_aligned = to4x4(prev_overlap_aligned_3x4)   # w2c(prev overlap, global)
-    E0_aligned = np.linalg.inv(T_prev_cur) @ E_prev_aligned  # w2c(cur frame0, global)
-
-    # 4) 用 chunk 内相对位姿把 frame1 推出来（仍然是 w2c）
-    E0_local = to4x4(cur_chunk_prediction.extrinsics[0])  # w2c(local)
-    E1_local = to4x4(cur_chunk_prediction.extrinsics[1])  # w2c(local)
-
-    T_c1_c0 = E1_local @ np.linalg.inv(E0_local)          # c0 -> c1 (w2c形式的相对)
-    E1_aligned = T_c1_c0 @ E0_aligned                     # w2c(cur frame1, global)
-
-    # 5) 下一次对齐（比如 2-3 之后对齐 3-4）需要用“当前chunk最后一帧”的全局外参
-    prev_overlap_for_next = to3x4(E1_aligned)
-
-    return to3x4(E0_aligned), to3x4(E1_aligned), prev_overlap_for_next,s
+    # 批量转换：将 [N, H, W, 3] 转换为 [N, 3, H, W]
+    return images.transpose(0, 3, 1, 2) / 255.0
 
 def estimate_depth_scale(prev_chunk, cur_chunk, conf_th=0.2, eps=1e-6):
     d_prev = prev_chunk.depth[-1]     # overlap frame in prev
@@ -177,6 +143,51 @@ def estimate_depth_scale(prev_chunk, cur_chunk, conf_th=0.2, eps=1e-6):
 
     s_depth = np.median(d_prev[mask] / d_cur[mask])
     return float(s_depth)
+
+def compute_aligned_chunk_extrinsics_from_prev_overlap(
+    overlap_frame_global_extrinsics_for_next_align: np.ndarray,
+    cur_chunk_local_extrinsics: np.ndarray,
+    point_cloud_transform: np.ndarray,
+):
+    """
+    根据：
+      - overlap_frame_global_extrinsics_for_next_align: 上一chunk overlap(最后一帧) 的 全局 w2c
+      - cur_chunk_local_extrinsics:   当前chunk每帧的 局部 w2c (N,3,4)，world=chunk局部
+      - point_cloud_transform:      ICP得到的点变换: p_prev ≈ R p_cur + t
+    推出：
+      - cur_chunk_frame_extrinsics_aligned_3x4: 当前chunk每帧的 全局 w2c (N,3,4)
+    """
+
+    def to4x4(E3x4):
+        E = np.eye(4, dtype=np.float64)
+        E[:3, :4] = E3x4
+        return E
+
+    def to3x4(E4x4):
+        return E4x4[:3, :4]
+
+    # ---- A) 先把 prev overlap 的全局 w2c 提到 4x4 ----
+    E_prev_global = to4x4(overlap_frame_global_extrinsics_for_next_align)  # w2c(prev overlap, global)
+
+    # ---- B) 由 ICP 变换把 cur overlap(=cur frame0) 的全局 w2c 求出来 ----
+    # 关键关系：E_prev_global = Transform_prev_from_cur * E_cur0_global
+    # => E_cur0_global = inv(Transform_prev_from_cur) * E_prev_global
+    E_cur0_global = np.linalg.inv(point_cloud_transform) @ E_prev_global
+
+    # ---- C) 利用 chunk 内部的相对位姿，把 cur0 推到 cur_i（仍然 w2c）----
+    # T_ci_from_c0 = E_i_local * inv(E_0_local)      (注意这里 E 都是 w2c)
+    # E_i_global   = T_ci_from_c0 * E_0_global
+    E0_local = to4x4(cur_chunk_local_extrinsics[0])
+    E0_local_inv = np.linalg.inv(E0_local)
+
+    aligned_list = []
+    for i in range(cur_chunk_local_extrinsics.shape[0]):
+        Ei_local = to4x4(cur_chunk_local_extrinsics[i])
+        T_ci_from_c0 = Ei_local @ E0_local_inv
+        Ei_global = T_ci_from_c0 @ E_cur0_global
+        aligned_list.append(to3x4(Ei_global))
+
+    return np.stack(aligned_list, axis=0)  # (N,3,4)
 
 # So3 ICP
 def align_two_point_clouds_icp(source: np.ndarray, 
@@ -195,7 +206,7 @@ def align_two_point_clouds_icp(source: np.ndarray,
     返回:
         s: 尺度因子 (刚性变换默认为1.0)
         R: 3x3旋转矩阵
-        t: 3x1平移向量
+        t: 3x1平移向量  (3,1)
     """
     # 将numpy数组转换为Open3D点云
     source_pcd = o3d.geometry.PointCloud()
@@ -324,7 +335,20 @@ def align_two_point_clouds(source: np.ndarray,
                           target: np.ndarray,
                           threshold: float = 0.001,
                           max_iterations: int = 30) -> Tuple[float, np.ndarray, np.ndarray]:
+    """
+    配准两个点云 把source配到target上
     
+    参数:
+        source: 源点云 [N, 3]
+        target: 目标点云 [N, 3]
+        threshold: 距离阈值
+        max_iterations: 最大迭代次数
+        
+    返回:
+        s: 尺度因子 (刚性变换默认为1.0)
+        R: 3x3旋转矩阵 
+        t: 3x1平移向量  (3,1)
+    """
     s,R,t = align_two_point_clouds_icp(source,target,threshold,max_iterations)
     # s,R,t = align_two_point_clouds_umeyama(source,target,threshold,max_iterations)
     print(f"s: {s}")

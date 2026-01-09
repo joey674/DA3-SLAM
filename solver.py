@@ -35,7 +35,7 @@ class SLAMSolver:
         self.chunk_prediction_list: List[Dict] = []
         
         # 与chunk对齐相关容器
-        self.sim3_transforms: List[Tuple[float, np.ndarray, np.ndarray]] = []  # relative to prev chunk
+        # self.sim3_transforms: List[Tuple[float, np.ndarray, np.ndarray]] = []  # relative to prev chunk
         self.prev_overlap_aligned_3x4 = None # 记录“上一 chunk overlap(最后一帧)”在全局坐标系下的 w2c
 
         # 模型
@@ -94,6 +94,7 @@ class SLAMSolver:
         extrinsics_global = chunk_prediction.get("extrinsics_global", None)
         if extrinsics_global is None:
             # fallback：如果没对齐字段，就用原始 extrinsics
+            print("warn: no extrinsics_global; if is not the first chunk then error")
             extrinsics_global = chunk_prediction["extrinsics"]
 
         n = len(chunk_prediction["image_paths"])
@@ -133,6 +134,21 @@ class SLAMSolver:
 
         cur_chunk_prediction["extrinsics_global"] = extrinsics_global
         self.prev_overlap_aligned_3x4 = prev_overlap_for_next
+        
+        ### 内参检查
+        # def _print_K(name, K):
+        #     fx, fy, cx, cy = K[0,0], K[1,1], K[0,2], K[1,2]
+        #     print(f"{name}: fx={fx:.3f}, fy={fy:.3f}, cx={cx:.3f}, cy={cy:.3f}")
+
+        # K_prev = prev_chunk_prediction["intrinsics"][-1]
+        # K_cur  = cur_chunk_prediction["intrinsics"][0]
+        # _print_K("K_prev(last)", K_prev)
+        # _print_K("K_cur(first)", K_cur)
+        # print("K diff max:", np.max(np.abs(K_prev - K_cur)))
+
+        # img_prev = prev_chunk_prediction["processed_images"][-1]
+        # img_cur  = cur_chunk_prediction["processed_images"][0]
+        # print("processed HxW prev:", img_prev.shape[:2], "cur:", img_cur.shape[:2])
 
         return s, R, t
 
@@ -180,6 +196,7 @@ class SLAMSolver:
         self.frame_buffer.append(image_path)
 
         if self.should_run_chunk_prediction():
+            print("="*50)
             print(f"\n  Processing chunk {self.chunk_count}...")
 
             chunk_image_paths = self.load_chunk_image_paths()
@@ -193,12 +210,9 @@ class SLAMSolver:
                 # 初始化 prev_overlap_aligned 为第一 chunk 最后一帧
                 self.prev_overlap_aligned_3x4 = cur_chunk_prediction["extrinsics_global"][-1]
 
-                # identity transform 占位，避免后面取 [-1] 崩
-                self.sim3_transforms.append((1.0, np.eye(3, dtype=np.float64), np.zeros(3, dtype=np.float64)))
             else:
                 prev_chunk_prediction = self.chunk_prediction_list[self.chunk_count - 1]
                 s, R, t = self.process_chunk_alignment(prev_chunk_prediction, cur_chunk_prediction)
-                self.sim3_transforms.append((s, R, t))
 
             # 更新可视化（用 extrinsics_global）
             self.update_viewer(cur_chunk_prediction)
@@ -211,7 +225,7 @@ class SLAMSolver:
 
             time.sleep(self.config["Model"]["sleep_between_chunk"])
             print("  Sleep for observation")
-            print("#" * 50)
+            print("=" * 50)
 
     def run(self):
         print("=" * 50)

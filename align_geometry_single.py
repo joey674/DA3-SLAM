@@ -125,14 +125,23 @@ def extract_single_overlap_point_cloud(prev_chunk_prediction, cur_chunk_predicti
 # ---------- ICP alignment (SE3) ----------
 def align_two_point_clouds_icp(source: np.ndarray,
                                target: np.ndarray,
-                               threshold: float = 0.001,
-                               max_iterations: int = 50) -> Tuple[float, np.ndarray, np.ndarray]:
+                               threshold: float,
+                               max_iterations: int,
+                               verbose: bool = True) -> Tuple[float, np.ndarray, np.ndarray]:
     """
     target ≈ R * source + t
     return s(=1), R, t
     """
+    # 过滤 NaN/Inf
+    src0_n = source.shape[0]
+    tgt0_n = target.shape[0]
     source = source[np.isfinite(source).all(axis=1)]
     target = target[np.isfinite(target).all(axis=1)]
+
+    if verbose:
+        print(f"[ICP] threshold={threshold}, max_iter={max_iterations}")
+        print(f"[ICP] source points: {src0_n} -> {source.shape[0]} (finite)")
+        print(f"[ICP] target points: {tgt0_n} -> {target.shape[0]} (finite)")
 
     source_pcd = o3d.geometry.PointCloud()
     target_pcd = o3d.geometry.PointCloud()
@@ -153,14 +162,28 @@ def align_two_point_clouds_icp(source: np.ndarray,
     T = reg.transformation
     R = T[:3, :3]
     t = T[:3, 3]
+
+    if verbose:
+        # 关键收敛/质量指标
+        # fitness: inlier correspondence ratio (0~1, 越大越好)
+        # inlier_rmse: inlier 的 RMSE（越小越好，量纲=坐标单位）
+        print(f"[ICP] fitness={reg.fitness:.6f}, inlier_rmse={reg.inlier_rmse:.6f}")
+        print("[ICP] transformation T (target <- source):")
+        print(T)
+
+        # 可选：把变换拆开看
+        rot_det = np.linalg.det(R)
+        print(f"[ICP] det(R)={rot_det:.6f} (should be close to +1)")
+        print(f"[ICP] t={t}")
+
     s = 1.0
     return s, R, t
 
 
 def align_two_point_clouds(source: np.ndarray,
                            target: np.ndarray,
-                           threshold: float = 0.001,
-                           max_iterations: int = 50) -> Tuple[float, np.ndarray, np.ndarray]:
+                           threshold: float,
+                           max_iterations: int ) -> Tuple[float, np.ndarray, np.ndarray]:
     s, R, t = align_two_point_clouds_icp(source, target, threshold, max_iterations)
     return s, R, t
 
@@ -169,7 +192,7 @@ def align_two_point_clouds(source: np.ndarray,
 def get_aligned_chunk_extrinsics_single_overlap(prev_overlap_aligned_3x4: np.ndarray,
                                                 prev_chunk_prediction,
                                                 cur_chunk_prediction,
-                                                icp_threshold: float = 0.0001,
+                                                icp_threshold: float = 0.1,
                                                 icp_max_iter: int = 50):
     """
     单帧 overlap 对齐，把 cur chunk 对齐到“全局坐标系”（prev_overlap_aligned_3x4 所在的全局）。
