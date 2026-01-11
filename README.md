@@ -7,8 +7,12 @@ cd ../Model_DepthAnythingV3/ && pip install -e .
 cd ../DA3-SLAM/ && pip install -r requirements.txt
 
 
-SLAM Solver
+# SLAM Solver
 python ./main_slam.py --image_dir /home/zhouyi/repo/dataset/C3VD2/brightness
 
-point cloud alignment
+# point cloud alignment
 python ./main_align.py
+
+# in mac
+export KMP_DUPLICATE_LIB_OK=TRUE
+python ./main_conf.py

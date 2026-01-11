@@ -11,7 +11,7 @@ from utils import (
 )
 
 # 改成新的单帧对齐辅助文件
-from align_geometry_single import (
+from utils.align_geometry_single import (
     get_aligned_chunk_extrinsics_single_overlap,
     image_to_chw01,
     estimate_depth_scale,
@@ -48,7 +48,7 @@ class SLAMSolver:
 
     def load_model(self):
         """加载DA3模型"""
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.device = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
         print(f"Using device: {self.device}")
 
         try:

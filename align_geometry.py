@@ -2,12 +2,15 @@ import torch
 import numpy as np
 from typing import Tuple
 import open3d as o3d
+from typing import List
 ###############################################
-# So3 ICP
-def align_two_point_clouds_icp(source: np.ndarray, 
-                          target: np.ndarray,
-                          threshold: float = 0.0001,
-                          max_iterations: int = 50) -> Tuple[float, np.ndarray, np.ndarray]:
+# ICP So(3)
+def align_two_point_clouds_icp(
+                            source: np.ndarray, 
+                            target: np.ndarray,
+                            threshold: float = 0.0001,
+                            max_iterations: int = 50
+                            ) -> Tuple[float, np.ndarray, np.ndarray]:
     """
     使用ICP算法配准两个点云
     
@@ -52,7 +55,7 @@ def align_two_point_clouds_icp(source: np.ndarray,
     
     return s, R, t
 
-# Sim3 umeyama
+# Umeyama SIM(3)
 def _umeyama_sim3(X: np.ndarray, Y: np.ndarray) -> Tuple[float, np.ndarray, np.ndarray]:
     """
     Solve: Y ≈ s R X + t
@@ -78,26 +81,18 @@ def _umeyama_sim3(X: np.ndarray, Y: np.ndarray) -> Tuple[float, np.ndarray, np.n
     t = mu_y - s * (R @ mu_x)
     return s, R, t
 
-def align_two_point_clouds_umeyama(source: np.ndarray,
+def align_two_point_clouds_umeyama(
+                                source: np.ndarray,
                                 target: np.ndarray,
                                 threshold: float = 0.001,
-                                max_iterations: int = 30,
-                                max_corr: int = 200000,
-                                seed: int = 0) -> Tuple[float, np.ndarray, np.ndarray]:
+                                max_iterations: int = 30
+                                ) -> Tuple[float, np.ndarray, np.ndarray]:
     """
-    Sim3-ICP:
       target ≈ s R source + t
     """
     # ---- clean ----
     source = source[np.isfinite(source).all(axis=1)]
     target = target[np.isfinite(target).all(axis=1)]
-
-    # ---- subsample (optional, keep it simple) ----
-    rng = np.random.default_rng(seed)
-    if source.shape[0] > max_corr:
-        source = source[rng.choice(source.shape[0], max_corr, replace=False)]
-    if target.shape[0] > max_corr:
-        target = target[rng.choice(target.shape[0], max_corr, replace=False)]
 
     # Open3D KDTree on target
     tgt_pcd = o3d.geometry.PointCloud()
@@ -144,11 +139,31 @@ def align_two_point_clouds_umeyama(source: np.ndarray,
 
     return float(s_cum), R_cum, t_cum
 
+# TurboReg
+def align_two_point_clouds_turboreg(
+                                source: np.ndarray,
+                                target: np.ndarray,
+                                threshold: float = 0.001,
+                                max_iterations: int = 30
+                                ) -> Tuple[float, np.ndarray, np.ndarray]:
+    return 
+
+# IRLS
+def align_two_point_clouds_irls(
+                                source: np.ndarray,
+                                target: np.ndarray,
+                                threshold: float = 0.001,
+                                max_iterations: int = 30
+                                ) -> Tuple[float, np.ndarray, np.ndarray]:
+    
+    return 
+
 # api
 def align_two_point_clouds(source: np.ndarray, 
                           target: np.ndarray,
                           threshold: float = 0.001,
-                          max_iterations: int = 30) -> Tuple[float, np.ndarray, np.ndarray]:
+                          max_iterations: int = 30,
+                          method: str = "icp") -> Tuple[float, np.ndarray, np.ndarray]:
     """
     配准两个点云 把source配到target上
     
@@ -163,8 +178,9 @@ def align_two_point_clouds(source: np.ndarray,
         R: 3x3旋转矩阵 
         t: 3x1平移向量  (3,1)
     """
+
     s,R,t = align_two_point_clouds_icp(source,target,threshold,max_iterations)
-    # s,R,t = align_two_point_clouds_umeyama(source,target,threshold,max_iterations)
+    s,R,t = align_two_point_clouds_umeyama(source,target,threshold,max_iterations)
     print(f"s: {s}")
     print(f"R: {R}")
     print(f"t: {t}")
@@ -350,3 +366,28 @@ def compute_aligned_chunk_extrinsics_from_prev_overlap(
         aligned_list.append(to3x4(Ei_global))
 
     return np.stack(aligned_list, axis=0)  
+
+
+def make_image_chunks(image_paths: List[str], chunk_size: int, overlap: int = 1) -> List[List[str]]:
+    """
+        把图片路径按 chunk_size 分块，相邻 chunk 共享 overlap 张图（默认 overlap=1。
+        例如 chunk_size=4, overlap=1:
+        [0,1,2,3], [3,4,5,6], [6,7,8,9], ...
+    """
+    assert chunk_size >= 2, "chunk_size 至少要 2（否则没法做 overlap 对齐）"
+    assert 0 <= overlap < chunk_size, "overlap 必须满足 0 <= overlap < chunk_size"
+
+    n = len(image_paths)
+    if n < chunk_size:
+        return []
+
+    step = chunk_size - overlap
+
+    starts = list(range(0, n - chunk_size + 1, step))
+    # 确保最后一张能被覆盖到（如果没刚好落在末尾，补一个最后起点）
+    last_start = n - chunk_size
+    if starts[-1] != last_start:
+        starts.append(last_start)
+
+    return [image_paths[s : s + chunk_size] for s in starts]
+
